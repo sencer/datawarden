@@ -1,0 +1,285 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "validated"
+version = "0.1.0"
+description = "Pandas validation using Annotated types and decorators"
+authors = [{ name = "Sencer S.", email = "nospam@gmail.com" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "loguru>=0.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "basedpyright>=1.31.7",
+    "ruff>=0.1.0",
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "build>=0.10.0", # Added for package building
+    "twine>=4.0.0", # Added for package distribution checking and uploading
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["validated*"]
+
+[tool.setuptools.package-data]
+validated = ["py.typed"]
+
+
+# ============================================================
+# RUFF CONFIGURATION - MAXIMUM STRICTNESS
+# ============================================================
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+indent-width = 2
+fix = true
+show-fixes = true
+preview = true  # Enable preview rules (PLR1702, etc.)
+
+[tool.ruff.lint]
+# Comprehensive rule set for strict checking
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "BLE",    # flake8-blind-except (no bare except:)
+    "C4",     # flake8-comprehensions
+    "C90",    # mccabe complexity
+    "T20",    # flake8-print (no print statements)
+    "SIM",    # flake8-simplify
+    "N",      # pep8-naming
+    "Q",      # flake8-quotes
+    "RUF",    # Ruff-specific rules
+    "ASYNC",  # flake8-async
+    "S",      # flake8-bandit (security)
+    "PTH",    # flake8-use-pathlib
+    "ERA",    # eradicate (commented-out code)
+    "PL",     # pylint (includes PLR1702: too-many-nested-blocks)
+    "PERF",   # perflint (performance)
+    "ANN",    # flake8-annotations
+    "ARG",    # flake8-unused-arguments
+    "FBT",    # flake8-boolean-trap (no boolean positional args)
+    "RET",    # flake8-return
+    "TCH",    # flake8-type-checking
+]
+
+ignore = [
+    "E501",    # Line too long (formatter handles this)
+    "S603",    # subprocess without shell=True (too strict)
+    "S607",    # Starting a process with a partial path (too strict)
+    "FBT",     # Allow boolean arguments (validate=True)
+    "E111",    # Indentation is not a multiple of 4
+    "E114",    # Indentation is not a multiple of 4 (comment)
+    # Complexity rules (legitimate domain complexity for type introspection)
+    "PLR6301", # Method could be staticmethod (intentional design)
+    "C901",    # Cyclomatic complexity (decorator introspection)
+    "PLR0915", # Too many statements (decorator introspection)
+    "PLR0912", # Too many branches (decorator introspection)
+    "PLR1702", # Too many nested blocks (type introspection)
+]
+
+# Complexity limits (anti-LLM-slop)
+[tool.ruff.lint.mccabe]
+max-complexity = 10  # Maximum cyclomatic complexity
+
+# Per-file ignores
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = [
+    "F401",    # Allow unused imports in __init__.py
+]
+"tests/**/*.py" = [
+    "S101",    # Allow assert in tests
+    "PLR2004", # Allow magic values in tests
+    "PLR6301", # Allow test methods (pytest pattern)
+    "PLR0913", # Allow many function arguments in test cases
+    "ANN",     # Don't require annotations in tests
+    "FBT",     # Allow boolean args in tests
+    "D",       # Don't require docstrings in tests
+]
+"benchmarks/**/*.py" = [
+    "T201",    # Allow print statements in benchmarks
+    "ANN",     # Don't require annotations in benchmarks
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["validated"]
+combine-as-imports = true
+force-sort-within-sections = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.flake8-type-checking]
+strict = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+# ============================================================
+# Basedpyright CONFIGURATION - MAXIMUM STRICTNESS
+# TypeScript strict mode equivalent
+# ============================================================
+[tool.basedpyright]
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
+
+# ============================================================
+# IMPORT AND MODULE CHECKS
+# ============================================================
+reportMissingImports = true
+reportMissingTypeStubs = false  # Relax: pandas-stubs not installed
+reportUndefinedVariable = true
+reportAssertAlwaysTrue = true
+reportInvalidStringEscapeSequence = true
+
+# ============================================================
+# STRICT NULL SAFETY (like TS strictNullChecks)
+# ============================================================
+reportOptionalSubscript = true
+reportOptionalMemberAccess = true
+reportOptionalCall = true
+reportOptionalIterable = true
+reportOptionalContextManager = true
+reportOptionalOperand = true
+reportAny = false
+reportExplicitAny = false
+reportIgnoreCommentWithoutRule = false  # No permitir # type: ignore sin código
+reportPrivateLocalImportUsage = true
+
+# ============================================================
+# TYPE COMPLETENESS (like TS noImplicitAny + strictFunctionTypes)
+# ============================================================
+reportMissingParameterType = true
+reportMissingTypeArgument = true
+reportUnknownParameterType = true
+reportUnknownLambdaType = true
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnknownMemberType = false
+reportUntypedFunctionDecorator = true
+reportUntypedClassDecorator = true
+reportUntypedBaseClass = true
+reportUntypedNamedTuple = true
+
+# ============================================================
+# CLASS AND INHERITANCE CHECKS
+# ============================================================
+reportIncompatibleMethodOverride = true
+reportIncompatibleVariableOverride = true
+reportInconsistentConstructor = true
+reportUninitializedInstanceVariable = true
+reportOverlappingOverload = true
+reportMissingSuperCall = true  # STRICT: Enable
+
+# ============================================================
+# CODE QUALITY (like TS noUnusedLocals + noUnusedParameters)
+# ============================================================
+reportPrivateUsage = true
+reportConstantRedefinition = true
+reportInvalidStubStatement = true
+reportIncompleteStub = true
+reportUnsupportedDunderAll = true
+reportUnusedClass = "error"        # STRICT: Error instead of warning
+reportUnusedFunction = "error"     # STRICT: Error instead of warning
+reportUnusedVariable = "error"     # STRICT: Error instead of warning
+reportUnusedImport = "error"       # STRICT: Error instead of warning
+reportDuplicateImport = "error"    # STRICT: Error instead of warning
+
+# ============================================================
+# UNNECESSARY CODE DETECTION
+# ============================================================
+reportUnnecessaryIsInstance = false       # Relax: false positives on unions
+reportUnnecessaryCast = "error"               # STRICT: Error
+reportUnnecessaryComparison = "error"         # STRICT: Error
+reportUnnecessaryContains = "error"           # STRICT: Error
+reportUnnecessaryTypeIgnoreComment = false  # Relax: gradual cleanup
+
+# ============================================================
+# FUNCTION/METHOD SIGNATURE STRICTNESS
+# ============================================================
+reportGeneralTypeIssues = true
+reportPropertyTypeMismatch = true
+reportFunctionMemberAccess = true
+reportCallInDefaultInitializer = true
+reportImplicitStringConcatenation = true  # STRICT: Enable
+reportOperatorIssue = false
+
+# ============================================================
+# ADDITIONAL STRICT CHECKS (Progressive Enhancement)
+# ============================================================
+reportImplicitOverride = true    # STRICT: Require @override decorator (Python 3.12+)
+reportDeprecated = "warning"     # Warn on deprecated usage
+
+# ============================================================
+# ADDITIONAL TYPE CHECKS
+# ============================================================
+reportImportCycles = "warning"
+
+# ============================================================
+# EXCLUSIONS
+# ============================================================
+exclude = [
+    "**/__pycache__",
+    ".venv",
+    "build",
+    "dist",
+    "benchmarks",
+    "tests",
+]
+
+# ============================================================
+# PYTEST CONFIGURATION
+# ============================================================
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "-W error",  # STRICT: Treat warnings as errors (catch deprecations early)
+    "--tb=short",
+    "--cov=src",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-report=html",
+    "--cov-fail-under=80",  # STRICT: Require 80% coverage
+]
+filterwarnings = [
+    "error",  # Treat all warnings as errors by default
+]
+
+# ============================================================
+# COVERAGE CONFIGURATION
+# ============================================================
+[tool.coverage.run]
+source = ["src"]
+branch = true
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+fail_under = 80
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "@overload",
+]
