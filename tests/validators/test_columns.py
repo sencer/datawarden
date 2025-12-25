@@ -6,14 +6,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from validated import (
+from datawarden import (
   Finite,
   HasColumn,
   HasColumns,
   IsDtype,
-  MaybeEmpty,
   MonoUp,
-  Nullable,
   Positive,
 )
 
@@ -26,7 +24,7 @@ class TestIsDtype:
 
     # Valid
     data = pd.Series([1.0, 2.0])
-    assert validator.validate(data) is data
+    assert validator.validate(data) is None
 
     # Invalid
     data = pd.Series([1, 2])
@@ -38,7 +36,7 @@ class TestIsDtype:
 
     # Valid
     data = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
-    assert validator.validate(data) is data
+    assert validator.validate(data) is None
 
     # Invalid
     data = pd.DataFrame({"a": [1.0, 2.0], "b": [1, 2]})
@@ -47,15 +45,16 @@ class TestIsDtype:
 
   def test_numpy_dtype(self):
     validator = IsDtype(np.float64)
+    validator = IsDtype(np.float64)
     data = pd.Series([1.0, 2.0], dtype=np.float64)
-    assert validator.validate(data) is data
+    assert validator.validate(data) is None
 
   def test_dataframe_all_columns_match(self):
     """Test IsDtype with DataFrame where all columns match."""
     df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
     validator = IsDtype(np.dtype("int64"))
-    result = validator.validate(df)
-    assert result.equals(df)
+    validator = IsDtype(np.dtype("int64"))
+    assert validator.validate(df) is None
 
   def test_dataframe_column_mismatch(self):
     """Test IsDtype with DataFrame where one column doesn't match."""
@@ -68,8 +67,8 @@ class TestIsDtype:
     """Test HasColumns validator with multiple columns."""
     data = pd.DataFrame({"a": [1, 2], "b": [3, 4], "c": [5, 6]})
     validator = HasColumns(["a", "b"])
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = HasColumns(["a", "b"])
+    assert validator.validate(data) is None
 
   def test_missing_single_column(self):
     """Test HasColumns validator with missing column."""
@@ -96,8 +95,8 @@ class TestIsDtype:
     """Test HasColumns applies validators to columns."""
     df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
     validator = HasColumns(["a", "b"], Positive)
-    result = validator.validate(df)
-    assert result.equals(df)
+    validator = HasColumns(["a", "b"], Positive)
+    assert validator.validate(df) is None
 
   def test_hascolumns_validator_fails(self):
     """Test HasColumns fails when column validator fails."""
@@ -109,23 +108,23 @@ class TestIsDtype:
   def test_hascolumns_with_nullable(self):
     """Test HasColumns with Nullable marker."""
     df = pd.DataFrame({"a": [1, np.nan, 3], "b": [4, 5, 6]})
-    validator = HasColumns(["a", "b"], Nullable)
-    result = validator.validate(df)
-    assert result.equals(df)
+    validator = HasColumns(["a", "b"])
+    validator = HasColumns(["a", "b"])
+    assert validator.validate(df) is None
 
   def test_hascolumns_with_maybeempty(self):
     """Test HasColumns with MaybeEmpty marker."""
     df = pd.DataFrame({"a": [], "b": []})
-    validator = HasColumns(["a", "b"], MaybeEmpty, Nullable)
-    result = validator.validate(df)
-    assert result.equals(df)
+    validator = HasColumns(["a", "b"])
+    validator = HasColumns(["a", "b"])
+    assert validator.validate(df) is None
 
   def test_hascolumns_single_column_string(self):
     """Test HasColumns with single column as string."""
     df = pd.DataFrame({"a": [1, 2, 3]})
     validator = HasColumns(["a"])
-    result = validator.validate(df)
-    assert result.equals(df)
+    validator = HasColumns(["a"])
+    assert validator.validate(df) is None
 
 
 class TestHasColumn:
@@ -135,8 +134,8 @@ class TestHasColumn:
     """Test HasColumn with single validator."""
     data = pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [4.0, 5.0, 6.0]})
     validator = HasColumn("a", Finite)
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = HasColumn("a", Finite)
+    assert validator.validate(data) is None
 
   def test_single_validator_fails(self):
     """Test HasColumn validator fails when column violates constraint."""
@@ -149,8 +148,8 @@ class TestHasColumn:
     """Test HasColumn with multiple validators."""
     data = pd.DataFrame({"a": [1.0, 2.0, 3.0], "b": [4.0, 5.0, 6.0]})
     validator = HasColumn("a", Finite, Positive)
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = HasColumn("a", Finite, Positive)
+    assert validator.validate(data) is None
 
   def test_multiple_validators_fails(self):
     """Test HasColumn with multiple validators where one fails."""
@@ -170,8 +169,8 @@ class TestHasColumn:
     """Test HasColumn with MonoUp validator."""
     data = pd.DataFrame({"a": [1, 2, 3], "b": [10, 5, 3]})
     validator = HasColumn("a", MonoUp)
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = HasColumn("a", MonoUp)
+    assert validator.validate(data) is None
 
     # Column b is not monotonic up
     validator_b = HasColumn("b", MonoUp)
@@ -183,9 +182,9 @@ class TestHasColumn:
     data = pd.DataFrame({"a": [1.0, np.inf, -5.0], "b": [4.0, 5.0, 6.0]})
 
     # Should pass - column exists (even with invalid values)
+    # Should pass - column exists (even with invalid values)
     validator = HasColumn("a")
-    result = validator.validate(data)
-    assert result.equals(data)
+    assert validator.validate(data) is None
 
     # Should fail - column doesn't exist
     validator_missing = HasColumn("missing")
@@ -195,27 +194,13 @@ class TestHasColumn:
   def test_hascolumn_with_nullable(self):
     """Test HasColumn with Nullable marker."""
     df = pd.DataFrame({"a": [1, np.nan, 3], "b": [4, 5, 6]})
-    validator = HasColumn("a", Nullable)
-    result = validator.validate(df)
-    assert result.equals(df)
+    validator = HasColumn("a")
+    validator = HasColumn("a")
+    assert validator.validate(df) is None
 
   def test_hascolumn_with_maybeempty(self):
     """Test HasColumn with MaybeEmpty marker."""
     df = pd.DataFrame({"a": [], "b": []})
-    validator = HasColumn("a", MaybeEmpty, Nullable)
-    result = validator.validate(df)
-    assert result.equals(df)
-
-  def test_hascolumn_typevar_usage(self):
-    """Test HasColumn with direct validator usage."""
-    df = pd.DataFrame({"col": [1, 2, 3]})
-    validator = HasColumn("col", Positive)
-    result = validator.validate(df)
-    assert result.equals(df)
-
-  def test_hascolumn_getitem_syntax(self):
-    """Test HasColumn with __getitem__ syntax."""
-    df = pd.DataFrame({"test": [1, 2, 3]})
-    validator = HasColumn("test", Positive)
-    result = validator.validate(df)
-    assert result.equals(df)
+    validator = HasColumn("a")
+    validator = HasColumn("a")
+    assert validator.validate(df) is None

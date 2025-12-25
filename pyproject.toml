@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "validated"
+name = "datawarden"
 version = "0.1.0"
 description = "Pandas validation using Annotated types and decorators"
 authors = [{ name = "Sencer S.", email = "nospam@gmail.com" }]
@@ -28,10 +28,10 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["validated*"]
+include = ["datawarden*"]
 
 [tool.setuptools.package-data]
-validated = ["py.typed"]
+datawarden = ["py.typed"]
 
 
 # ============================================================
@@ -87,6 +87,7 @@ ignore = [
     "PLR0915", # Too many statements (decorator introspection)
     "PLR0912", # Too many branches (decorator introspection)
     "PLR1702", # Too many nested blocks (type introspection)
+    "PLW0603", # Global statement for shared executor (intentional lazy init)
 ]
 
 # Complexity limits (anti-LLM-slop)
@@ -113,7 +114,7 @@ max-complexity = 10  # Maximum cyclomatic complexity
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["validated"]
+known-first-party = ["datawarden"]
 combine-as-imports = true
 force-sort-within-sections = true
 

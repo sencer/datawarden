@@ -5,7 +5,7 @@
 import pandas as pd
 import pytest
 
-from validated import Ge, Gt, Le, Lt
+from datawarden import Ge, Gt, Le, Lt
 
 
 class TestGe:
@@ -15,15 +15,15 @@ class TestGe:
     """Test Ge validator with valid column comparison."""
     data = pd.DataFrame({"high": [10, 20, 30], "low": [5, 10, 15]})
     validator = Ge("high", "low")
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = Ge("high", "low")
+    assert validator.validate(data) is None
 
   def test_equal_values_allowed(self):
     """Test Ge validator allows equal values."""
     data = pd.DataFrame({"high": [10, 10, 10], "low": [10, 10, 10]})
     validator = Ge("high", "low")
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = Ge("high", "low")
+    assert validator.validate(data) is None
 
   def test_invalid_comparison(self):
     """Test Ge validator rejects invalid comparison."""
@@ -33,12 +33,12 @@ class TestGe:
       validator.validate(data)
 
   def test_missing_columns(self):
-    """Test Ge validator with missing columns."""
+    """Test Ge validator with missing columns raises error."""
     data = pd.DataFrame({"high": [10, 20]})
     validator = Ge("high", "low")
-    # Should not raise if column is missing
-    result = validator.validate(data)
-    assert result.equals(data)
+    # Should raise ValueError if column is missing
+    with pytest.raises(ValueError, match="Missing columns for comparison"):
+      validator.validate(data)
 
   def test_non_dataframe(self):
     """Test Ge validator with non-DataFrame."""
@@ -60,8 +60,8 @@ class TestGe:
     """Test Ge validator with unary comparison."""
     data = pd.Series([5, 6, 7])
     validator = Ge(5)
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = Ge(5)
+    assert validator.validate(data) is None
 
   def test_unary_fails(self):
     """Test Ge validator fails with unary comparison."""
@@ -78,15 +78,15 @@ class TestLe:
     """Test Le validator with valid column comparison."""
     data = pd.DataFrame({"low": [5, 10, 15], "high": [10, 20, 30]})
     validator = Le("low", "high")
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = Le("low", "high")
+    assert validator.validate(data) is None
 
   def test_equal_values_allowed(self):
     """Test Le validator allows equal values."""
     data = pd.DataFrame({"low": [10, 10, 10], "high": [10, 10, 10]})
     validator = Le("low", "high")
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = Le("low", "high")
+    assert validator.validate(data) is None
 
   def test_invalid_comparison(self):
     """Test Le validator rejects invalid comparison."""
@@ -108,8 +108,8 @@ class TestLe:
     """Test Le validator with unary comparison on Series."""
     data = pd.Series([1, 2, 3])
     validator = Le(5)
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = Le(5)
+    assert validator.validate(data) is None
 
   def test_unary_fails(self):
     """Test Le validator fails with unary comparison."""
@@ -126,8 +126,8 @@ class TestGt:
     """Test Gt validator with valid column comparison."""
     data = pd.DataFrame({"high": [20, 30, 40], "low": [10, 20, 30]})
     validator = Gt("high", "low")
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = Gt("high", "low")
+    assert validator.validate(data) is None
 
   def test_equal_values_rejected(self):
     """Test Gt validator rejects equal values."""
@@ -156,8 +156,8 @@ class TestGt:
     """Test Gt validator with unary comparison on Series."""
     data = pd.Series([2, 3, 4])
     validator = Gt(1)
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = Gt(1)
+    assert validator.validate(data) is None
 
   def test_unary_fails(self):
     """Test Gt validator fails with unary comparison."""
@@ -174,8 +174,8 @@ class TestLt:
     """Test Lt validator with valid column comparison."""
     data = pd.DataFrame({"low": [10, 20, 30], "high": [20, 30, 40]})
     validator = Lt("low", "high")
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = Lt("low", "high")
+    assert validator.validate(data) is None
 
   def test_equal_values_rejected(self):
     """Test Lt validator rejects equal values."""
@@ -204,8 +204,8 @@ class TestLt:
     """Test Lt validator with unary comparison on Series."""
     data = pd.Series([1, 2, 3])
     validator = Lt(5)
-    result = validator.validate(data)
-    assert result.equals(data)
+    validator = Lt(5)
+    assert validator.validate(data) is None
 
   def test_unary_fails(self):
     """Test Lt validator fails with unary comparison."""

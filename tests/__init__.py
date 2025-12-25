@@ -1,1 +1,1 @@
-"""Tests from validated library."""
+"""Tests from datawarden library."""
