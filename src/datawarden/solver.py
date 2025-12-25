@@ -7,12 +7,12 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
   from collections.abc import Sequence
 
-  from validated.base import Validator
+  from datawarden.base import Validator
 
-from validated.domain import ValidationDomain
-from validated.exceptions import LogicError
-from validated.validators.comparison import Ge, Gt, Le, Lt
-from validated.validators.value import OneOf
+from datawarden.domain import ValidationDomain
+from datawarden.exceptions import LogicError
+from datawarden.validators.comparison import Ge, Gt, Le, Lt
+from datawarden.validators.value import OneOf
 
 
 def is_domain_validator(

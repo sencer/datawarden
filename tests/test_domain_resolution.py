@@ -3,9 +3,9 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from validated import Validated, validated  # noqa: TC001
-from validated.exceptions import LogicError
-from validated.validators import Gt, HasColumn, Lt, OneOf  # noqa: TC001
+from datawarden import Validated, validate  # noqa: TC001
+from datawarden.exceptions import LogicError
+from datawarden.validators import Gt, HasColumn, Lt, OneOf  # noqa: TC001
 
 # =============================================================================
 # 1. Automatic Contradiction Resolution (Implicit Override)
@@ -16,7 +16,7 @@ def test_implicit_override_contradiction():
   # Global: Greater than 10
   # Local: Less than 5
   # Contradiction -> Local should win
-  @validated
+  @validate
   def process(df: Validated[pd.DataFrame, Gt(10), HasColumn("A", Lt(5))]):
     return df
 
@@ -39,7 +39,7 @@ def test_intersection_overlap():
   # Global: Greater than 0
   # Local: Less than 10
   # Result: Between 0 and 10
-  @validated
+  @validate
   def process(df: Validated[pd.DataFrame, Gt(0), HasColumn("A", Lt(10))]):
     return df
 
@@ -67,7 +67,7 @@ def test_local_contradiction_raises_error():
   # Local: Greater than 10 AND Less than 5 -> Impossible
   with pytest.raises(LogicError):
 
-    @validated
+    @validate
     def process(df: Validated[pd.DataFrame, HasColumn("A", Gt(10), Lt(5))]):
       pass
 
@@ -76,7 +76,7 @@ def test_global_contradiction_raises_error():
   # Global: Greater than 10 AND Less than 5 -> Impossible
   with pytest.raises(LogicError):
 
-    @validated
+    @validate
     def process(df: Validated[pd.DataFrame, Gt(10), Lt(5)]):
       pass
 
@@ -90,7 +90,7 @@ def test_oneof_intersection():
   # Global: OneOf 'a', 'b', 'c'
   # Local: OneOf 'a', 'b'
   # Result: Subset 'a', 'b'
-  @validated
+  @validate
   def process(
     df: Validated[
       pd.DataFrame,
@@ -113,7 +113,7 @@ def test_oneof_contradiction():
   # Global: OneOf 'a', 'b'
   # Local: OneOf 'c', 'd'
   # Intersection Empty -> Local wins (User intent override)
-  @validated
+  @validate
   def process(
     df: Validated[
       pd.DataFrame,
@@ -142,7 +142,7 @@ def test_oneof_contradiction():
 
 def test_range_filters_allowed_set():
 
-  @validated
+  @validate
   def process(df: Validated[pd.DataFrame, OneOf(1, 5, 10), HasColumn("A", Gt(4))]):
     return df
 

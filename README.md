@@ -1,17 +1,17 @@
-# validated
+# datawarden
 
-![CI](https://github.com/sencer/validated/actions/workflows/ci.yml/badge.svg)
-[![codecov](https://codecov.io/gh/sencer/validated/branch/master/graph/badge.svg)](https://app.codecov.io/github/sencer/validated)
+![CI](https://github.com/sencer/datawarden/actions/workflows/ci.yml/badge.svg)
+[![codecov](https://codecov.io/gh/sencer/datawarden/branch/master/graph/badge.svg)](https://app.codecov.io/github/sencer/datawarden)
 
 **Pandas validation using Annotated types and decorators**
 
-`validated` is a lightweight Python library for validating pandas DataFrames and Series using Python's `Annotated` types and decorators. It provides a clean, type-safe way to express data validation constraints directly in function signatures.
+`datawarden` is a lightweight Python library for validating pandas DataFrames and Series using Python's `Annotated` types and decorators. It provides a clean, type-safe way to express data validation constraints directly in function signatures.
 
 ## Features
 
 - 🎯 **Type-safe validation** - Uses Python's `Annotated` types for inline constraints
 - 🐼 **Pandas-focused** - Built specifically for pandas DataFrames and Series
-- ⚡ **Decorator-based** - Simple `@validated` decorator for automatic validation
+- ⚡ **Decorator-based** - Simple `@validate` decorator for automatic validation
 - 🔧 **Composable validators** - Chain multiple validators together
 - 🎨 **Clean syntax** - Validation rules live in your type annotations
 - 🚀 **Zero runtime overhead** - Optional validation can be disabled
@@ -19,21 +19,21 @@
 ## Installation
 
 ```bash
-pip install validated
+pip install datawarden
 ```
 
 Or with uv:
 ```bash
-uv add validated
+uv add datawarden
 ```
 
 ## Quick Start
 
 ```python
 import pandas as pd
-from validated import validated, Validated, Finite, NonNaN, NonEmpty
+from datawarden import validate, Validated, Finite, NonNaN, NonEmpty
 
-@validated
+@validate
 def calculate_returns(
     prices: Validated[pd.Series, Finite, NonNaN, NonEmpty],
 ) -> pd.Series:
@@ -71,57 +71,133 @@ calculate_returns(bad_prices)
 - **`MonoUp`** - Ensures values are monotonically increasing
 - **`MonoDown`** - Ensures values are monotonically decreasing
 - **`Datetime`** - Ensures data is a DatetimeIndex
-- **`OneOf["a", "b", "c"]`** - Ensures values are in allowed set (categorical)
+- **`OneOf("a", "b", "c")`** - Ensures values are in allowed set (categorical)
+
+### NaN-Tolerant Validation with IgnoringNaNs
+
+The `IgnoringNaNs` wrapper allows validators to skip NaN values during validation. It can be used in two ways:
+
+**1. Explicit wrapping** - wrap specific validators:
+
+```python
+from datawarden import validate, Validated, IgnoringNaNs, Ge, Lt
+import pandas as pd
+
+@validate
+def process(
+    data: Validated[pd.Series, IgnoringNaNs(Ge(0)), Lt(10)],
+) -> pd.Series:
+    # Ge(0) ignores NaNs: values >= 0 OR NaN are valid
+    # Lt(10) still rejects NaNs (default behavior)
+    return data
+```
+
+**2. Marker mode** - apply to all validators with `IgnoringNaNs()`:
+
+```python
+@validate
+def process(
+    data: Validated[pd.Series, Ge(0), Lt(100), IgnoringNaNs()],
+) -> pd.Series:
+    # Equivalent to: IgnoringNaNs(Ge(0)), IgnoringNaNs(Lt(100))
+    # All validators now ignore NaN values
+    return data
+
+# NaN values pass through, non-NaN values are validated
+import numpy as np
+data = pd.Series([10.0, np.nan, 50.0, np.nan, 90.0])
+result = process(data)  # Works! NaNs are ignored
+```
+
+Works with: `Ge`, `Le`, `Gt`, `Lt`, `Positive`, `NonNegative`, `Finite`, and any value validator.
 
 
 ### Shape Validators
 
-- **`Shape[10, 5]`** - Exact shape (10 rows, 5 columns)
-- **`Shape[Ge[10], Any]`** - At least 10 rows, any columns
-- **`Shape[Any, Le[5]]`** - Any rows, at most 5 columns
-- **`Shape[Gt[0], Lt[100]]`** - More than 0 rows, less than 100 columns
-- **`Shape[100]`** - For Series: exactly 100 rows
+- **`Shape(10, 5)`** - Exact shape (10 rows, 5 columns)
+- **`Shape(Ge(10), Any)`** - At least 10 rows, any columns
+- **`Shape(Any, Le(5))`** - Any rows, at most 5 columns
+- **`Shape(Gt(0), Lt(100))`** - More than 0 rows, less than 100 columns
+- **`Shape(100)`** - For Series: exactly 100 rows
 
 
 
 ### Index Wrapper
 
-The `Index[]` wrapper allows you to apply any Series/Index validator to the index of a Series or DataFrame:
+The `Index()` wrapper allows you to apply any Series/Index validator to the index of a Series or DataFrame:
 
-- **`Index[Datetime]`** - Ensures index is a DatetimeIndex
-- **`Index[MonoUp]`** - Ensures index is monotonically increasing
-- **`Index[Unique]`** - Ensures index values are unique
-- **`Index[Datetime, MonoUp, Unique]`** - Combine multiple validators
+- **`Index(Datetime)`** - Ensures index is a DatetimeIndex
+- **`Index(MonoUp)`** - Ensures index is monotonically increasing
+- **`Index(Unique)`** - Ensures index values are unique
+- **`Index(Datetime, MonoUp, Unique)`** - Combine multiple validators
 
 ### DataFrame Column Validators
 
-- **`HasColumns["col1", "col2"]`** - Ensures specified columns exist
-- **`Ge["high", "low"]`** - Ensures one column >= another column
-- **`Le["low", "high"]`** - Ensures one column <= another column
-- **`Gt["high", "low"]`** - Ensures one column > another column
-- **`Lt["low", "high"]`** - Ensures one column < another column
+- **`HasColumns("col1", "col2")`** - Ensures specified columns exist
+- **`Ge("high", "low")`** - Ensures one column >= another column
+- **`Le("low", "high")`** - Ensures one column <= another column
+- **`Gt("high", "low")`** - Ensures one column > another column
+- **`Lt("low", "high")`** - Ensures one column < another column
 
 ### Column-Specific Validators
 
-- **`HasColumn["col"]`** - Check that DataFrame has column
-- **`HasColumn["col", Validator, ...]`** - Check column exists and apply Series validators
+- **`HasColumn("col")`** - Check that DataFrame has column
+- **`HasColumn("col", Validator, ...)`** - Check column exists and apply Series validators
+
+### Lambda Validators
+
+- **`Is(predicate, name=None)`** - Element-wise predicate validation
+- **`Rows(predicate, name=None)`** - Row-wise predicate validation for DataFrames
+
+```python
+from datawarden import validate, Validated, Is, Rows, HasColumn
+import pandas as pd
+
+# Element-wise: check all values satisfy condition
+@validate
+def process_values(
+    data: Validated[pd.Series, Is(lambda x: (x >= 0) & (x <= 100))],
+) -> pd.Series:
+    return data
+
+# Column-specific with Is
+@validate
+def process_roots(
+    data: Validated[pd.DataFrame, HasColumn("root", Is(lambda x: x**2 < 2))],
+) -> pd.DataFrame:
+    return data
+
+# Row-wise: check each row satisfies condition
+@validate
+def process_ohlc(
+    data: Validated[pd.DataFrame, Rows(lambda row: row["high"] >= row["low"])],
+) -> pd.DataFrame:
+    return data
+
+# With descriptive error name
+@validate
+def process_budget(
+    data: Validated[pd.DataFrame, Rows(lambda row: row.sum() < 100, name="row sum must be < 100")],
+) -> pd.DataFrame:
+    return data
+```
 
 ### Gap Validators (Time Series)
 
 - **`NoTimeGaps`** - Ensures no gaps in datetime values/index
-- **`MaxGap[timedelta]`** - Ensures maximum gap between datetime values
-- **`MaxDiff[value]`** - Ensures maximum difference between consecutive values
+- **`MaxGap(timedelta)`** - Ensures maximum gap between datetime values
+- **`MaxDiff(value)`** - Ensures maximum difference between consecutive values
 
 ## Examples
 
 ### Basic Series Validation
 
 ```python
-from validated import validated, Validated, Positive, NonNaN
+from datawarden import validate, Validated, Positive, NonNaN
 import numpy as np
 import pandas as pd
 
-@validated
+@validate
 def calculate_log_returns(
     prices: Validated[pd.Series, Positive, NonNaN],
 ) -> pd.Series:
@@ -135,12 +211,12 @@ log_returns = calculate_log_returns(prices)
 ### DataFrame Column Validation
 
 ```python
-from validated import validated, Validated, HasColumns, Ge, NonNaN
+from datawarden import validate, Validated, HasColumns, Ge, NonNaN
 import pandas as pd
 
-@validated
+@validate
 def calculate_true_range(
-    data: Validated[pd.DataFrame, HasColumns["high", "low", "close"], Ge["high", "low"], NonNaN],
+    data: Validated[pd.DataFrame, HasColumns("high", "low", "close"), Ge("high", "low"), NonNaN],
 ) -> pd.Series:
     """Calculate True Range - requires OHLC data."""
     hl = data["high"] - data["low"]
@@ -165,12 +241,12 @@ calculate_true_range(bad_data)
 ### Time Series Validation with Index
 
 ```python
-from validated import validated, Validated, Index, Datetime, MonoUp, Finite
+from datawarden import validate, Validated, Index, Datetime, MonoUp, Finite
 import pandas as pd
 
-@validated
+@validate
 def resample_ohlc(
-    data: Validated[pd.DataFrame, Index[Datetime, MonoUp], Finite],
+    data: Validated[pd.DataFrame, Index(Datetime, MonoUp), Finite],
     freq: str = "1D",
 ) -> pd.DataFrame:
     """Resample OHLC data to different frequency."""
@@ -201,12 +277,12 @@ resample_ohlc(bad_data)
 ### Unique Values Validation
 
 ```python
-from validated import validated, Validated, Index, Unique
+from datawarden import validate, Validated, Index, Unique
 import pandas as pd
 
-@validated
+@validate
 def process_unique_ids(
-    data: Validated[pd.DataFrame, Index[Unique]],
+    data: Validated[pd.DataFrame, Index(Unique)],
 ) -> pd.DataFrame:
     """Process data with unique index values."""
     return data.sort_index()
@@ -225,12 +301,12 @@ process_unique_ids(bad_df)
 
 ```python
 from typing import Literal
-from validated import validated, Validated, OneOf, HasColumn
+from datawarden import validate, Validated, OneOf, HasColumn
 import pandas as pd
 
-@validated
+@validate
 def process_orders(
-    data: Validated[pd.DataFrame, HasColumn["status", OneOf["pending", "shipped", "delivered"]]],
+    data: Validated[pd.DataFrame, HasColumn("status", OneOf("pending", "shipped", "delivered"))],
 ) -> pd.DataFrame:
     """Process orders with validated status column."""
     return data[data["status"] != "pending"]
@@ -249,29 +325,22 @@ bad_orders = pd.DataFrame({
 })
 # Raises: ValueError: Values must be one of {'pending', 'shipped', 'delivered'}, got invalid: {'cancelled'}
 process_orders(bad_orders)
-
-# Also works with Literal type syntax
-@validated
-def process_with_literal(
-    data: Validated[pd.Series, OneOf[Literal["a", "b", "c"]]],
-) -> pd.Series:
-    return data
 ```
 
 ### Monotonic Value Validation
 
 ```python
-from validated import validated, Validated, MonoUp, MonoDown
+from datawarden import validate, Validated, MonoUp, MonoDown
 import pandas as pd
 
-@validated
+@validate
 def calculate_cumulative_returns(
     prices: Validated[pd.Series, MonoUp],
 ) -> pd.Series:
     """Calculate cumulative returns - prices must be monotonically increasing."""
     return (prices / prices.iloc[0]) - 1
 
-@validated
+@validate
 def track_drawdown(
     equity: Validated[pd.Series, MonoDown],
 ) -> pd.Series:
@@ -283,12 +352,12 @@ def track_drawdown(
 
 ```python
 from typing import Any
-from validated import validated, Validated, Shape, Ge, Le
+from datawarden import validate, Validated, Shape, Ge, Le
 import pandas as pd
 
-@validated
+@validate
 def process_batch(
-    data: Validated[pd.DataFrame, Shape[Ge[10], Any]],
+    data: Validated[pd.DataFrame, Shape(Ge(10), Any)],
 ) -> pd.DataFrame:
     """Process data batch - must have at least 10 rows."""
     return data.describe()
@@ -303,17 +372,17 @@ small_df = pd.DataFrame({"a": [1, 2, 3]})
 process_batch(small_df)
 
 # Constrain both dimensions
-@validated
+@validate
 def process_matrix(
-    data: Validated[pd.DataFrame, Shape[Ge[5], Le[10]]],
+    data: Validated[pd.DataFrame, Shape(Ge(5), Le(10))],
 ) -> pd.DataFrame:
     """Process matrix - 5+ rows, max 10 columns."""
     return data
 
 # Exact shape for Series
-@validated
+@validate
 def process_vector(
-    data: Validated[pd.Series, Shape[100]],
+    data: Validated[pd.Series, Shape(100)],
 ) -> pd.Series:
     """Process vector - must have exactly 100 elements."""
     return data
@@ -322,16 +391,16 @@ def process_vector(
 ### Column-Specific Validation with HasColumn
 
 ```python
-from validated import validated, Validated, HasColumn, Finite, Positive, MonoUp
+from datawarden import validate, Validated, HasColumn, Finite, Positive, MonoUp
 import pandas as pd
 
-@validated
+@validate
 def process_trading_data(
     data: Validated[
         pd.DataFrame,
-        HasColumn["price", Finite, Positive],
-        HasColumn["volume", Finite, Positive],
-        HasColumn["timestamp", MonoUp],
+        HasColumn("price", Finite, Positive),
+        HasColumn("volume", Finite, Positive),
+        HasColumn("timestamp", MonoUp),
     ],
 ) -> pd.DataFrame:
     """Process trading data with column-specific validation.
@@ -345,9 +414,9 @@ def process_trading_data(
     )
 
 # Or just check column presence:
-@validated
+@validate
 def simple_check(
-    data: Validated[pd.DataFrame, HasColumn["price"], HasColumn["volume"]],
+    data: Validated[pd.DataFrame, HasColumn("price"), HasColumn("volume")],
 ) -> float:
     """Just check columns exist."""
     return (data["price"] * data["volume"]).sum()
@@ -356,12 +425,12 @@ def simple_check(
 ### Chaining Multiple Index Validators
 
 ```python
-from validated import validated, Validated, Index, Datetime, MonoUp, Unique, Finite, Positive
+from datawarden import validate, Validated, Index, Datetime, MonoUp, Unique, Finite, Positive
 import pandas as pd
 
-@validated
+@validate
 def calculate_volume_profile(
-    volume: Validated[pd.Series, Index[Datetime, MonoUp, Unique], Finite, Positive],
+    volume: Validated[pd.Series, Index(Datetime, MonoUp, Unique), Finite, Positive],
 ) -> pd.Series:
     """Calculate volume profile - must be datetime-indexed, monotonic, unique, finite, positive."""
     return volume.groupby(volume.index.hour).sum()
@@ -384,7 +453,7 @@ result = calculate_returns(prices, skip_validation=True)
 Create your own validators by subclassing `Validator`:
 
 ```python
-from validated import Validator, validated, Validated
+from datawarden import Validator, validate, Validated
 import pandas as pd
 
 class InRange(Validator):
@@ -400,7 +469,7 @@ class InRange(Validator):
                 raise ValueError(f"Data must be in range [{self.min_val}, {self.max_val}]")
         return data
 
-@validated
+@validate
 def normalize_percentage(
     data: Validated[pd.Series, InRange(0, 100)],
 ) -> pd.Series:
@@ -410,14 +479,14 @@ def normalize_percentage(
 
 ## Performance & Optimization
 
-`validated` is designed for high-performance data pipelines:
+`datawarden` is designed for high-performance data pipelines:
 
 ### Parallel Validation
 
-When a function accepts multiple validated arguments, `validated` automatically validates them in parallel using a thread pool. This leverages the release of the GIL during pandas/numpy operations, providing significant speedups for large datasets.
+When a function accepts multiple validated arguments, `datawarden` automatically validates them in parallel using a thread pool. This leverages the release of the GIL during pandas/numpy operations, providing significant speedups for large datasets.
 
 ```python
-@validated
+@validate
 def process_large_data(
     source: Validated[pd.DataFrame, Finite, NonNaN],
     target: Validated[pd.DataFrame, Finite, NonNaN],
@@ -431,7 +500,7 @@ def process_large_data(
 For maximum performance in production critical paths, you can disable validation globally or per-call:
 
 - **Per-call:** `func(data, skip_validation=True)`
-- **Defaults:** Use `@validated(skip_validation_by_default=True)` for functions that should only be validated during development or debugging.
+- **Defaults:** Use `@validate(skip_validation_by_default=True)` for functions that should only be validated during development or debugging.
 
 ### Cached Validator Compilation
 
@@ -439,14 +508,14 @@ Validation logic is pre-compiled at import time (when the decorator runs). The r
 
 ## Type Checking
 
-`validated` includes a `py.typed` marker for full type checker support. Your IDE and type checkers (mypy, pyright, basedpyright) will understand the validation annotations.
+`datawarden` includes a `py.typed` marker for full type checker support. Your IDE and type checkers (mypy, pyright, basedpyright) will understand the validation annotations.
 
 ### How Type Checkers Handle `Validated`
 
 According to PEP 593, `Annotated[T, metadata]` (which `Validated` is an alias for) is treated as **equivalent to `T`** for type checking purposes. This means:
 
 ```python
-@validated
+@validate
 def process(data: Validated[pd.Series, Finite]) -> float:
     return data.sum()
 
@@ -456,59 +525,29 @@ result = process(series)  # ✓ Type checker is happy!
 ```
 
 The validation metadata is:
-- **Preserved at runtime** - Used by the `@validated` decorator for validation
+- **Preserved at runtime** - Used by the `@validate` decorator for validation
 - **Ignored by type checkers** - `Validated[pd.Series, Finite]` is treated as `pd.Series`
 
 This gives you the best of both worlds: clean type checking and runtime validation.
 
 ## Opt-in Strictness
 
-In Validated
-
-Pandas validation using Annotated types and decorators.
-
-## Features
-
-- **Standard Python Typing**: Use `Annotated[pd.Series, Validator]` syntax
-- **Decorator-based**: `@validated` handles validation automatically
-- **Performance**: Validation can be disabled globally or per-call
-- **Clean API**: No strict schema objects required
-
-## Installation
-
-```bash
-pip install validated
-```
-
-## Usage
-
-```python
-from validated import validated, Validated
-from validated.validators import Finite, Ge
-import pandas as pd
-
-@validated
-def process_data(
-    data: Validated[pd.Series, Finite, Ge(0)]
-):
-    return data.mean()
-```
-validation is opt-in. By default, arguments wrapped in `Validated[...]` are only checked for type compatibility (via other tools) unless validators are provided.
+Validation in `datawarden` is opt-in. By default, arguments wrapped in `Validated[...]` are only checked for type compatibility (via other tools) unless validators are provided.
 
 To enforce strict checks like "no NaNs" or "not empty", you must explicitly add the corresponding validators:
 
 ```python
-from validated import validated, Validated, NonNaN, NonEmpty
+from datawarden import validate, Validated, NonNaN, NonEmpty
 import pandas as pd
 
-@validated
+@validate
 def process_flexible(data: Validated[pd.Series, None]) -> float:
     """Accepts any Series (NaNs and empty allowed)."""
     if data.empty:
         return 0.0
     return data.sum()
 
-@validated
+@validate
 def process_strict(data: Validated[pd.Series, NonNaN, NonEmpty]) -> float:
     """Rejects NaNs and empty data."""
     return data.sum()
@@ -516,18 +555,18 @@ def process_strict(data: Validated[pd.Series, NonNaN, NonEmpty]) -> float:
 
 ## Comparison with Pandera
 
-While [Pandera](https://pandera.readthedocs.io/) is excellent for comprehensive schema validation, `validated` offers a lighter-weight alternative focused on:
+While [Pandera](https://pandera.readthedocs.io/) is excellent for comprehensive schema validation, `datawarden` offers a lighter-weight alternative focused on:
 
 - **Inline validation** - Constraints live in function signatures
-- **Decorator simplicity** - Single `@validated` decorator
+- **Decorator simplicity** - Single `@validate` decorator
 - **Type annotation syntax** - Uses Python's native `Annotated` types
 - **Minimal overhead** - Lightweight with no heavy dependencies
 
-Use `validated` when you want simple, inline validation. Use Pandera when you need comprehensive schema management, complex validation logic, or data contracts.
+Use `datawarden` when you want simple, inline validation. Use Pandera when you need comprehensive schema management, complex validation logic, or data contracts.
 
 ## Performance
 
-`validated` is designed to be lightweight with minimal overhead:
+`datawarden` is designed to be lightweight with minimal overhead:
 
 - Validation checks are only performed when `skip_validation=False` (default)
 - No schema compilation or complex preprocessing
@@ -542,7 +581,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 MIT License - see LICENSE file for details.
 
-## Why validated?
+## Why datawarden?
 
 **Problem:** When building data analysis pipelines with pandas, you often need to validate:
 - Data has no NaN or Inf values
@@ -552,4 +591,4 @@ MIT License - see LICENSE file for details.
 
 **Traditional approach:** Add manual validation checks at the start of each function.
 
-**With validated:** Express validation constraints directly in type annotations using `Validated[Type, Validator, ...]` and get automatic validation with the `@validated` decorator.
+**With datawarden:** Express validation constraints directly in type annotations using `Validated[Type, Validator, ...]` and get automatic validation with the `@validate` decorator.

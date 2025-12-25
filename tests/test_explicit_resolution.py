@@ -4,8 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from validated import Validated, validated  # noqa: TC001
-from validated.validators import (
+from datawarden import Validated, validate  # noqa: TC001
+from datawarden.validators import (
   Finite,  # noqa: TC001
   Gt,
   HasColumn,  # noqa: TC001
@@ -21,7 +21,7 @@ from validated.validators import (
 
 
 def test_explicit_override_gt():
-  @validated
+  @validate
   def process(df: Validated[pd.DataFrame, Gt(0), HasColumn("A", Gt(10))]):
     return df
 
@@ -48,7 +48,7 @@ def test_explicit_override_gt():
 
 def test_explicit_disable_lt_add_gt():
   # Global Lt(1). Local A: Lt(None) [Disabled], Gt(5).
-  @validated
+  @validate
   def process(df: Validated[pd.DataFrame, Lt(1), HasColumn("A", Lt(None), Gt(5))]):
     return df
 
@@ -74,7 +74,7 @@ def test_explicit_disable_lt_add_gt():
 
 
 def test_additive_checks():
-  @validated
+  @validate
   def process(df: Validated[pd.DataFrame, Finite, HasColumn("A", Positive)]):
     return df
 
@@ -98,7 +98,7 @@ def test_additive_checks():
 
 
 def test_plural_has_columns_override():
-  @validated
+  @validate
   def process(df: Validated[pd.DataFrame, Gt(0), HasColumns(["A", "B"], Gt(10))]):
     return df
 
@@ -125,7 +125,7 @@ def test_plural_has_columns_override():
 def test_type_based_resolution():
   # Global: IsDtype float
   # Local A: IsDtype int -> Should override.
-  @validated
+  @validate
   def process(
     df: Validated[pd.DataFrame, IsDtype(float), HasColumn("A", IsDtype(int))],
   ):
@@ -151,7 +151,7 @@ def test_type_based_resolution():
 
 
 def test_global_default():
-  @validated
+  @validate
   def process(df: Validated[pd.DataFrame, Gt(0)]):
     return df
 

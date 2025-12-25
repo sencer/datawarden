@@ -7,7 +7,7 @@ from typing import override
 import numpy as np
 import pandas as pd
 
-from validated.base import Validator
+from datawarden.base import Validator
 
 
 def _get_datetime_array(
@@ -29,14 +29,14 @@ class NoTimeGaps(Validator[pd.Series | pd.Index]):
 
   Works on:
   - pd.Series with datetime64 dtype (validates values)
-  - pd.DatetimeIndex (validates index, use with Index[NoTimeGaps[...]])
+  - pd.DatetimeIndex (validates index, use with Index(NoTimeGaps(...)))
 
   Example:
     # Validate datetime column values
-    data: Validated[pd.Series, NoTimeGaps["1min"]]
+    data: Validated[pd.Series, NoTimeGaps("1min")]
 
     # Validate index via Index wrapper
-    data: Validated[pd.DataFrame, Index[NoTimeGaps["1min"]]]
+    data: Validated[pd.DataFrame, Index(NoTimeGaps("1min"))]
   """
 
   def __init__(self, freq: str) -> None:
@@ -45,11 +45,12 @@ class NoTimeGaps(Validator[pd.Series | pd.Index]):
     # Pre-compute expected nanoseconds for performance
     self._expected_ns: int = pd.Timedelta(pd.tseries.frequencies.to_offset(freq)).value  # type: ignore[arg-type]
 
-  def __class_getitem__(cls, item: str) -> NoTimeGaps:
-    return cls(item)
+  @override
+  def __repr__(self) -> str:
+    return f"NoTimeGaps({self.freq!r})"
 
   @override
-  def validate(self, data: pd.Series | pd.Index) -> pd.Series | pd.Index:
+  def validate(self, data: pd.Series | pd.Index) -> None:
     dt_array = _get_datetime_array(data)
 
     if dt_array is None:
@@ -58,15 +59,13 @@ class NoTimeGaps(Validator[pd.Series | pd.Index]):
       )
 
     if len(dt_array) <= 1:
-      return data
+      return
 
     # Fully vectorized: numpy diff on underlying int64 nanoseconds
     actual_diffs_ns = np.diff(dt_array)
 
     if not np.all(actual_diffs_ns == self._expected_ns):
       raise ValueError(f"Time gaps detected with frequency '{self.freq}'")
-
-    return data
 
 
 class MaxGap(Validator[pd.Series | pd.Index]):
@@ -78,14 +77,14 @@ class MaxGap(Validator[pd.Series | pd.Index]):
 
   Works on:
   - pd.Series with datetime64 dtype (validates values)
-  - pd.DatetimeIndex (validates index, use with Index[MaxGap[...]])
+  - pd.DatetimeIndex (validates index, use with Index(MaxGap(...)))
 
   Example:
     # Allow up to 2-minute gaps in 1-minute data (tolerates 1 missing row)
-    data: Validated[pd.Series, MaxGap["2min"]]
+    data: Validated[pd.Series, MaxGap("2min")]
 
     # Validate index via Index wrapper
-    data: Validated[pd.DataFrame, Index[MaxGap["5min"]]]
+    data: Validated[pd.DataFrame, Index(MaxGap("5min"))]
   """
 
   def __init__(self, max_gap: str) -> None:
@@ -96,11 +95,12 @@ class MaxGap(Validator[pd.Series | pd.Index]):
       pd.tseries.frequencies.to_offset(max_gap)
     ).value  # type: ignore[arg-type]
 
-  def __class_getitem__(cls, item: str) -> MaxGap:
-    return cls(item)
+  @override
+  def __repr__(self) -> str:
+    return f"MaxGap({self.max_gap!r})"
 
   @override
-  def validate(self, data: pd.Series | pd.Index) -> pd.Series | pd.Index:
+  def validate(self, data: pd.Series | pd.Index) -> None:
     dt_array = _get_datetime_array(data)
 
     if dt_array is None:
@@ -109,7 +109,7 @@ class MaxGap(Validator[pd.Series | pd.Index]):
       )
 
     if len(dt_array) <= 1:
-      return data
+      return
 
     # Fully vectorized: numpy diff on underlying int64 nanoseconds
     actual_diffs_ns = np.diff(dt_array)
@@ -120,8 +120,6 @@ class MaxGap(Validator[pd.Series | pd.Index]):
         f"Time gap exceeds maximum '{self.max_gap}' (found gap of {max_found})"
       )
 
-    return data
-
 
 class MaxDiff(Validator[pd.Series]):
   """Validator for maximum allowed difference between consecutive numeric values.
@@ -130,21 +128,22 @@ class MaxDiff(Validator[pd.Series]):
 
   Example:
     # Price changes must be at most 10
-    data: Validated[pd.Series, MaxDiff[10.0]]
+    data: Validated[pd.Series, MaxDiff(10.0)]
 
     # Validate specific column
-    data: Validated[pd.DataFrame, HasColumn["price", MaxDiff[5.0]]]
+    data: Validated[pd.DataFrame, HasColumn("price", MaxDiff(5.0))]
   """
 
   def __init__(self, max_diff: float | int) -> None:
     super().__init__()
     self.max_diff = max_diff
 
-  def __class_getitem__(cls, item: float | int) -> MaxDiff:
-    return cls(item)
+  @override
+  def __repr__(self) -> str:
+    return f"MaxDiff({self.max_diff!r})"
 
   @override
-  def validate(self, data: pd.Series) -> pd.Series:
+  def validate(self, data: pd.Series) -> None:
     if not isinstance(data, pd.Series):
       raise TypeError("MaxDiff requires a pandas Series")
 
@@ -152,7 +151,7 @@ class MaxDiff(Validator[pd.Series]):
       raise ValueError("MaxDiff requires numeric data")
 
     if len(data) <= 1:
-      return data
+      return
 
     # Use absolute difference for numeric data
     diffs = np.abs(np.diff(data.values))  # type: ignore[arg-type]
@@ -162,5 +161,3 @@ class MaxDiff(Validator[pd.Series]):
       raise ValueError(
         f"Difference exceeds maximum {self.max_diff} (found diff of {max_found})"
       )
-
-    return data

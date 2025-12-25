@@ -2,7 +2,7 @@
 
 ## Decorator Performance
 
-Benchmark measuring the overhead of the `@validated` decorator with 10,000 iterations:
+Benchmark measuring the overhead of the `@validate` decorator with 10,000 iterations:
 
 ### Results Summary (After Optimization)
 

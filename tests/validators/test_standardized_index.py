@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from validated import (
+from datawarden import (
   Finite,
   Ge,
   Gt,
@@ -26,7 +26,7 @@ class TestStandardizedIndexValidation:
     """Test Finite validator works on pd.Index."""
     # Valid
     idx = pd.Index([1.0, 2.0, 3.0])
-    assert Finite().validate(idx).equals(idx)
+    assert Finite().validate(idx) is None
 
     # Check invalid input (Inf)
     idx_inf = pd.Index([1.0, np.inf, 3.0])
@@ -37,7 +37,7 @@ class TestStandardizedIndexValidation:
     """Test StrictFinite validator works on pd.Index."""
     # Valid
     idx = pd.Index([1.0, 2.0, 3.0])
-    assert StrictFinite().validate(idx).equals(idx)
+    assert StrictFinite().validate(idx) is None
 
     # Check invalid input (Inf)
     idx_inf = pd.Index([1.0, np.inf, 3.0])
@@ -61,7 +61,7 @@ class TestStandardizedIndexValidation:
     """Test NonNaN validator works on pd.Index."""
     # Valid
     idx = pd.Index([1.0, 2.0, 3.0])
-    assert NonNaN().validate(idx).equals(idx)
+    assert NonNaN().validate(idx) is None
 
     # Check invalid input (NaN)
     idx_nan = pd.Index([1.0, np.nan, 3.0])
@@ -73,22 +73,22 @@ class TestStandardizedIndexValidation:
     idx = pd.Index([1, 2, 3])
 
     # Ge
-    assert Ge(0).validate(idx).equals(idx)
+    assert Ge(0).validate(idx) is None
     with pytest.raises(ValueError, match=">= 5"):
       Ge(5).validate(idx)
 
     # Le
-    assert Le(5).validate(idx).equals(idx)
+    assert Le(5).validate(idx) is None
     with pytest.raises(ValueError, match="<= 0"):
       Le(0).validate(idx)
 
     # Gt
-    assert Gt(0).validate(idx).equals(idx)
+    assert Gt(0).validate(idx) is None
     with pytest.raises(ValueError, match="> 3"):
       Gt(3).validate(idx)
 
     # Lt
-    assert Lt(5).validate(idx).equals(idx)
+    assert Lt(5).validate(idx) is None
     with pytest.raises(ValueError, match="< 1"):
       Lt(1).validate(idx)
 
@@ -97,14 +97,14 @@ class TestStandardizedIndexValidation:
     idx = pd.Index([1, 2, 3])
 
     # Exact match
-    assert Shape(3).validate(idx).equals(idx)
+    assert Shape(3).validate(idx) is None
 
     # Mismatch
     with pytest.raises(ValueError, match="Index must have == 5 rows"):
       Shape(5).validate(idx)
 
     # Constraint
-    assert Shape(Ge(3)).validate(idx).equals(idx)
+    assert Shape(Ge(3)).validate(idx) is None
     with pytest.raises(ValueError, match="Index must have < 3 rows"):
       Shape(Lt(3)).validate(idx)
 
@@ -112,7 +112,7 @@ class TestStandardizedIndexValidation:
     """Test NonNegative validator works on pd.Index."""
     # Valid
     idx = pd.Index([0, 1, 2])
-    assert NonNegative().validate(idx).equals(idx)
+    assert NonNegative().validate(idx) is None
 
     # Check invalid input (< 0)
     idx_neg = pd.Index([1, -1, 2])
@@ -123,7 +123,7 @@ class TestStandardizedIndexValidation:
     """Test Positive validator works on pd.Index."""
     # Valid
     idx = pd.Index([1, 2, 3])
-    assert Positive().validate(idx).equals(idx)
+    assert Positive().validate(idx) is None
 
     # Check invalid input (<= 0)
     idx_zero = pd.Index([0, 1, 2])

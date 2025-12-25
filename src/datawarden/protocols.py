@@ -1,4 +1,4 @@
-"""Protocols from validated."""
+"""Protocols from datawarden."""
 
 from typing import Protocol, runtime_checkable
 

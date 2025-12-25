@@ -1,0 +1,193 @@
+"""Comparison validators for Series and DataFrame data."""
+
+from __future__ import annotations
+
+import operator
+from typing import TYPE_CHECKING, override
+
+import numpy as np
+import pandas as pd
+
+if TYPE_CHECKING:
+  from collections.abc import Callable
+from datawarden.base import Validator
+
+
+class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
+  """Base class for comparison validators (Ge, Le, Gt, Lt).
+
+  Eliminates code duplication by providing common validation logic.
+  """
+
+  # Subclasses must define these
+  op_symbol: str = ""  # pyright: ignore[reportUninitializedInstanceVariable]
+  op_func: Callable[[float, float], bool]  # pyright: ignore[reportUninitializedInstanceVariable]
+  opposite_op_func: Callable[[float, float], bool]  # pyright: ignore[reportUninitializedInstanceVariable]
+
+  def __init__(self, *targets: str | float | int | None) -> None:
+    super().__init__()
+    self.targets = targets
+
+  @override
+  def __repr__(self) -> str:
+    args = ", ".join(repr(t) for t in self.targets)
+    return f"{self.__class__.__name__}({args})"
+
+  def check(self, value: int) -> bool:
+    """Check constraint for a scalar integer (used by Shape validator)."""
+    if len(self.targets) == 1 and isinstance(self.targets[0], (int, float)):
+      return self.op_func(value, self.targets[0])  # pyright: ignore[reportCallIssue,reportArgumentType]
+    return False
+
+  def describe(self) -> str:
+    """Describe the constraint."""
+    if len(self.targets) == 1:
+      return f"{self.op_symbol} {self.targets[0]}"
+    return f"{self.__class__.__name__}({self.targets})"
+
+  @override
+  def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
+    # Check for NaN values before comparison
+    if (
+      isinstance(data, (pd.Series, pd.DataFrame, pd.Index))
+      and pd.isna(data.values).any()
+    ):
+      raise ValueError(
+        f"Cannot perform {self.op_symbol} comparison with NaN values (use IgnoringNaNs wrapper to skip NaN values)"
+      )
+
+    if len(self.targets) == 1:
+      # Unary comparison: data op target
+      target = self.targets[0]
+      if isinstance(data, (pd.Series, pd.DataFrame, pd.Index)) and np.any(
+        self.opposite_op_func(data.values, target)  # pyright: ignore[reportCallIssue,reportArgumentType]
+      ):
+        raise ValueError(f"Data must be {self.op_symbol} {target}")
+    else:
+      # Column comparison: col1 op col2 op col3 ...
+      if not isinstance(data, pd.DataFrame):
+        raise TypeError("Column comparison requires a pandas DataFrame")
+
+      for i in range(len(self.targets) - 1):
+        col1 = self.targets[i]
+        col2 = self.targets[i + 1]
+
+        if not isinstance(col1, str) or not isinstance(col2, str):
+          raise TypeError("Column comparison requires string column names")
+
+        # Check columns exist - fail explicitly rather than silently passing
+        missing = [c for c in (col1, col2) if c not in data.columns]
+        if missing:
+          raise ValueError(f"Missing columns for comparison: {missing}")
+
+        if np.any(self.opposite_op_func(data[col1].values, data[col2].values)):  # pyright: ignore[reportCallIssue,reportArgumentType]
+          raise ValueError(f"{col1} must be {self.op_symbol} {col2}")
+
+
+class Ge(_ComparisonValidator):
+  """Validator that data >= target (unary) or col1 >= col2 >= ... (n-ary).
+
+  Two modes of operation:
+
+  **Unary mode** - Compare all values against a scalar:
+    Ge(5) means all values must be >= 5
+
+  **N-ary mode** - Compare DataFrame columns pairwise:
+    Ge("high", "low") means high >= low for all rows
+    Ge("a", "b", "c") means a >= b >= c for all rows
+
+  Examples:
+    # Series: all values >= 0
+    data: Validated[pd.Series, Ge(0)]
+
+    # DataFrame: ensure high >= low
+    data: Validated[pd.DataFrame, Ge("high", "low")]
+
+  Note:
+    Rejects NaN values by default. Use IgnoringNaNs(Ge(...)) to skip NaN.
+  """
+
+  op_symbol = ">="
+  op_func = operator.ge
+  opposite_op_func = operator.lt  # Check for violations (< instead of >=)
+
+
+class Le(_ComparisonValidator):
+  """Validator that data <= target (unary) or col1 <= col2 <= ... (n-ary).
+
+  Two modes of operation:
+
+  **Unary mode** - Compare all values against a scalar:
+    Le(100) means all values must be <= 100
+
+  **N-ary mode** - Compare DataFrame columns pairwise:
+    Le("low", "high") means low <= high for all rows
+
+  Examples:
+    # Series: all values <= 100
+    data: Validated[pd.Series, Le(100)]
+
+    # DataFrame: ensure low <= mid <= high
+    data: Validated[pd.DataFrame, Le("low", "mid", "high")]
+
+  Note:
+    Rejects NaN values by default. Use IgnoringNaNs(Le(...)) to skip NaN.
+  """
+
+  op_symbol = "<="
+  op_func = operator.le
+  opposite_op_func = operator.gt  # Check for violations (> instead of <=)
+
+
+class Gt(_ComparisonValidator):
+  """Validator that data > target (unary) or col1 > col2 > ... (n-ary).
+
+  Two modes of operation:
+
+  **Unary mode** - Compare all values against a scalar:
+    Gt(0) means all values must be > 0 (strictly positive)
+
+  **N-ary mode** - Compare DataFrame columns pairwise:
+    Gt("high", "low") means high > low for all rows (strict inequality)
+
+  Examples:
+    # Series: all values > 0
+    data: Validated[pd.Series, Gt(0)]
+
+    # DataFrame columns strictly ordered
+    data: Validated[pd.DataFrame, Gt("high", "low")]
+
+  Note:
+    Rejects NaN values by default. Use IgnoringNaNs(Gt(...)) to skip NaN.
+  """
+
+  op_symbol = ">"
+  op_func = operator.gt
+  opposite_op_func = operator.le  # Check for violations (<= instead of >)
+
+
+class Lt(_ComparisonValidator):
+  """Validator that data < target (unary) or col1 < col2 < ... (n-ary).
+
+  Two modes of operation:
+
+  **Unary mode** - Compare all values against a scalar:
+    Lt(100) means all values must be < 100 (strictly less)
+
+  **N-ary mode** - Compare DataFrame columns pairwise:
+    Lt("low", "high") means low < high for all rows (strict inequality)
+
+  Examples:
+    # Series: all values < 100
+    data: Validated[pd.Series, Lt(100)]
+
+    # DataFrame columns strictly ordered
+    data: Validated[pd.DataFrame, Lt("low", "high")]
+
+  Note:
+    Rejects NaN values by default. Use IgnoringNaNs(Lt(...)) to skip NaN.
+  """
+
+  op_symbol = "<"
+  op_func = operator.lt
+  opposite_op_func = operator.ge  # Check for violations (>= instead of <)

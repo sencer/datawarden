@@ -1,4 +1,4 @@
-"""Detailed benchmark of @validated decorator overhead."""
+"""Detailed benchmark of @validate decorator overhead."""
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportCallIssue=false, reportArgumentType=false
 
@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from validated import Datetime, Finite, Index, MonoUp, Positive, Validated, validated
+from datawarden import Datetime, Finite, Index, MonoUp, Positive, Validated, validate
 
 # Setup test data
 small_data = pd.Series(np.random.rand(100))
@@ -23,19 +23,19 @@ def plain(data: pd.Series) -> float:
   return data.sum()
 
 
-@validated
+@validate
 def decorated_simple(data: Validated[pd.Series, Finite]) -> float:
   return data.sum()
 
 
-@validated
+@validate
 def decorated_multiple(data: Validated[pd.Series, Finite, Positive]) -> float:
   return data.sum()
 
 
-@validated
+@validate
 def decorated_index(
-  data: Validated[pd.Series, Index[Datetime, MonoUp], Finite],
+  data: Validated[pd.Series, Index(Datetime, MonoUp), Finite],
 ) -> float:
   return data.sum()
 
@@ -54,7 +54,7 @@ def run_benchmark(
 def main() -> None:
   iterations = 10000
   print("=" * 70)
-  print("@validated Decorator Performance Benchmark")
+  print("@validate Decorator Performance Benchmark")
   print("=" * 70)
   print(f"Iterations per test: {iterations:,}\n")
 
@@ -125,7 +125,7 @@ def main() -> None:
   print()
 
   # Test 4: Index validators
-  print("Test 4: Index Validators (Index[Datetime, MonoUp] + Finite)")
+  print("Test 4: Index Validators (Index(Datetime, MonoUp) + Finite)")
   print("-" * 70)
 
   t_plain = run_benchmark(plain, datetime_data, None, iterations)

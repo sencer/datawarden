@@ -1,4 +1,4 @@
-"""Tests for the @validated decorator."""
+"""Tests for the @validate decorator."""
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportCallIssue=false, reportArgumentType=false
 
@@ -7,31 +7,35 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from validated import (
+from datawarden import (
   Datetime,
   Finite,
   Ge,
   HasColumn,
   HasColumns,
+  IgnoringNaNs,
   Index,
-  MaybeEmpty,
+  MaxDiff,
   MonoUp,
   NonEmpty,
   NonNaN,
-  Nullable,
   Positive,
+  Shape,
   Validated,
-  validated,
+  Validator,
+  validate,
 )
+from datawarden.config import get_config
+import datawarden.decorator as decorator_module
 
 
 class TestValidatedDecorator:
-  """Tests for @validated decorator basic functionality."""
+  """Tests for @validate decorator basic functionality."""
 
   def test_function_with_validation(self):
-    """Test @validated decorator validates arguments."""
+    """Test @validate decorator validates arguments."""
 
-    @validated
+    @validate
     def process(data: Validated[pd.Series, Finite]):
       return data.sum()
 
@@ -40,9 +44,9 @@ class TestValidatedDecorator:
     assert result == 6.0
 
   def test_function_rejects_invalid_data(self):
-    """Test @validated decorator rejects invalid data."""
+    """Test @validate decorator rejects invalid data."""
 
-    @validated
+    @validate
     def process(data: Validated[pd.Series, Finite]):
       return data.sum()
 
@@ -51,9 +55,9 @@ class TestValidatedDecorator:
       process(invalid_data)
 
   def test_function_rejects_wrong_type(self):
-    """Test @validated decorator rejects wrong base type."""
+    """Test @validate decorator rejects wrong base type."""
 
-    @validated
+    @validate
     def process(data: Validated[pd.Series, Finite]):
       return data.sum()
 
@@ -69,7 +73,7 @@ class TestValidatedDecorator:
   def test_error_message_includes_context(self):
     """Test that error messages include function name, parameter name, and validator."""
 
-    @validated
+    @validate
     def my_func(prices: Validated[pd.Series, Finite]):
       return prices.sum()
 
@@ -79,7 +83,7 @@ class TestValidatedDecorator:
   def test_validation_can_be_disabled(self):
     """Test validation can be disabled with skip_validation=True."""
 
-    @validated
+    @validate
     def process(data: Validated[pd.Series, Finite]):
       return data.sum()
 
@@ -91,8 +95,8 @@ class TestValidatedDecorator:
   def test_multiple_validators(self):
     """Test multiple validators in chain."""
 
-    @validated
-    def process(data: Validated[pd.Series, Finite, Positive, Nullable]):
+    @validate
+    def process(data: Validated[pd.Series, Finite, Positive]):
       return data.sum()
 
     # Valid data
@@ -111,7 +115,7 @@ class TestValidatedDecorator:
   def test_dataframe_validation(self):
     """Test DataFrame validation."""
 
-    @validated
+    @validate
     def process(
       data: Validated[pd.DataFrame, HasColumns(["a", "b"]), Finite],
     ):
@@ -128,7 +132,7 @@ class TestValidatedDecorator:
   def test_preserves_function_metadata(self):
     """Test decorator preserves function name and docstring."""
 
-    @validated
+    @validate
     def my_function(data: Validated[pd.Series, Finite]):
       """My docstring."""
       return data.sum()
@@ -137,10 +141,10 @@ class TestValidatedDecorator:
     assert my_function.__doc__ == "My docstring."
 
   def test_works_with_methods(self):
-    """Test @validated works with class methods."""
+    """Test @validate works with class methods."""
 
     class Processor:
-      @validated
+      @validate
       def process(self, data: Validated[pd.Series, Finite]):
         return data.sum()
 
@@ -149,9 +153,9 @@ class TestValidatedDecorator:
     assert result == 6.0
 
   def test_optional_validated_argument(self):
-    """Test Optional[Validated[...]] annotation."""
+    """Test Optional[Validated[..., None]] annotation."""
 
-    @validated
+    @validate
     def process(data: Validated[pd.Series, Finite] | None = None):
       if data is None:
         return 0
@@ -170,10 +174,10 @@ class TestValidatedDecorator:
       process(pd.Series([1.0, np.inf, 3.0]))
 
   def test_optional_validated_argument_with_nan(self):
-    """Test Optional[Validated[..., Nullable]] allows NaNs."""
+    """Test Optional[Validated[..., None]] allows NaNs."""
 
-    @validated
-    def process(data: Validated[pd.Series, Nullable] | None = None):
+    @validate
+    def process(data: Validated[pd.Series, None] | None = None):
       if data is None:
         return 0
       return data.sum()
@@ -186,10 +190,10 @@ class TestValidatedDecorator:
   def test_multiple_arguments(self):
     """Test validation with multiple arguments."""
 
-    @validated
+    @validate
     def combine(
-      data1: Validated[pd.Series, Finite, Nullable],
-      data2: Validated[pd.Series, Finite, Nullable],
+      data1: Validated[pd.Series, Finite],
+      data2: Validated[pd.Series, Finite],
     ):
       return data1 + data2
 
@@ -207,9 +211,9 @@ class TestValidatedDecorator:
       combine(valid1, pd.Series([3.0, np.inf]))
 
   def test_non_validated_arguments_ignored(self):
-    """Test non-validated arguments are not validated."""
+    """Test non-validated arguments are not datawarden."""
 
-    @validated
+    @validate
     def process(
       data: Validated[pd.Series, Finite],
       multiplier: float,
@@ -227,7 +231,7 @@ class TestComplexValidations:
   def test_ohlc_validation(self):
     """Test validation of OHLC data."""
 
-    @validated
+    @validate
     def calculate_true_range(
       data: Validated[
         pd.DataFrame,
@@ -261,7 +265,7 @@ class TestComplexValidations:
   def test_time_series_validation(self):
     """Test time series specific validation."""
 
-    @validated
+    @validate
     def resample_data(
       data: Validated[pd.Series, Index(Datetime, MonoUp), Finite],
       freq: str = "1D",
@@ -292,9 +296,8 @@ class TestComplexValidations:
   def test_percentage_returns_validation(self):
     """Test validation for percentage returns calculation."""
 
-    @validated
-    @validated
-    def calculate_returns(prices: Validated[pd.Series, Finite, Positive, Nullable]):
+    @validate
+    def calculate_returns(prices: Validated[pd.Series, Finite, Positive]):
       return prices.pct_change(fill_method=None)
 
     # Valid prices
@@ -310,6 +313,23 @@ class TestComplexValidations:
     with pytest.raises(ValueError, match="must be finite"):
       calculate_returns(pd.Series([100.0, np.inf, 101.0]))
 
+  def test_ignoring_nans_wraps_has_column(self):
+    """Test IgnoringNaNs(HasColumn(...)) is handled correctly."""
+
+    @validate
+    def process(df: Validated[pd.DataFrame, IgnoringNaNs(HasColumn("a", Positive))]):
+      return df["a"].sum()
+
+    # DataFrame with NaNs in 'a' -> IgnoringNaNs should strictly skip NaNs
+    # and validation (Positive) should pass on remaining values.
+    # Without unwrapping logic, this would fail (TypeError or validation error).
+    df = pd.DataFrame({"a": [1.0, np.nan, 3.0]})
+    assert process(df) == 4.0
+
+    # Negative value should still fail (after skipping NaNs)
+    with pytest.raises(ValueError, match="must be positive"):
+      process(pd.DataFrame({"a": [1.0, np.nan, -1.0]}))
+
 
 class TestEdgeCases:
   """Tests for edge cases and error conditions."""
@@ -317,7 +337,7 @@ class TestEdgeCases:
   def test_empty_series_allowed_by_default(self):
     """Test validation allows empty Series by default (no strictness)."""
 
-    @validated
+    @validate
     def process(data: Validated[pd.Series, Finite]):
       return len(data)
 
@@ -328,42 +348,45 @@ class TestEdgeCases:
   def test_empty_series_allowed_with_marker(self):
     """Test validation allows empty Series with MaybeEmpty."""
 
-    @validated
-    def process(data: Validated[pd.Series, MaybeEmpty]):
+    @validate
+    def process(data: Validated[pd.Series, None]):
       return len(data)
 
     empty_data = pd.Series([], dtype=float)
     result = process(empty_data)
     assert result == 0
 
-  def test_validator_class_vs_instance(self):
-    """Test both Validator class and instance work."""
+  def test_validator_enforces_class_syntax(self):
+    """Test that Validator class is required for 0-arg validators."""
 
-    @validated
+    @validate
     def with_class(data: Validated[pd.Series, Finite]):
       return data.sum()
 
-    @validated
-    def with_instance(data: Validated[pd.Series, Finite()]):
-      return data.sum()
+    # Instance with 0 args should raise error at definition time
+    with pytest.raises(ValueError, match="Use validator class 'Finite'"):
+
+      @validate
+      def with_instance(data: Validated[pd.Series, Finite()]):
+        pass
 
     valid_data = pd.Series([1.0, 2.0, 3.0])
-    invalid_data = pd.Series([1.0, np.inf, 3.0])
 
-    # Both should work with valid data
+    # Class version works
     assert with_class(valid_data) == 6.0
-    assert with_instance(valid_data) == 6.0
 
-    # Both should reject invalid data
-    with pytest.raises(ValueError):
-      with_class(invalid_data)
-    with pytest.raises(ValueError):
-      with_instance(invalid_data)
+  def test_validator_instantiation_failure(self):
+    """Test that using a Validator class requiring args without instantiation raises TypeError."""
+    with pytest.raises(TypeError, match="could not be instantiated"):
+
+      @validate
+      def broken(data: Validated[pd.Series, MaxDiff]):
+        pass
 
   def test_function_without_validate_param(self):
     """Test function without validate parameter defaults to True."""
 
-    @validated
+    @validate
     def process(data: Validated[pd.Series, Finite]):
       return data.sum()
 
@@ -379,7 +402,7 @@ class TestEdgeCases:
   def test_kwargs_arguments(self):
     """Test validation works with keyword arguments."""
 
-    @validated
+    @validate
     def process(data: Validated[pd.Series, Finite]):
       return data.sum()
 
@@ -400,7 +423,7 @@ class TestEdgeCases:
   def test_default_argument_values(self):
     """Test validation with default argument values."""
 
-    @validated
+    @validate
     def process(
       data: Validated[pd.Series, Finite] | None = None,
     ):
@@ -418,7 +441,7 @@ class TestEdgeCases:
 
 
 def test_validated_decorator_defaults():
-  @validated
+  @validate
   def process(data: Validated[pd.Series, Finite]):
     return data
 
@@ -431,7 +454,7 @@ def test_validated_decorator_defaults():
 
 
 def test_validated_decorator_skip_default():
-  @validated(skip_validation_by_default=True)
+  @validate(skip_validation_by_default=True)
   def process(data: Validated[pd.Series, Finite]):
     return data
 
@@ -444,8 +467,8 @@ def test_validated_decorator_skip_default():
 
 
 def test_validated_decorator_no_args_call():
-  # This is technically valid python: @validated()
-  @validated()
+  # This is technically valid python: @validate()
+  @validate()
   def process(data: Validated[pd.Series, Finite]):
     return data
 
@@ -455,7 +478,7 @@ def test_validated_decorator_no_args_call():
 
 
 def test_validated_decorator_explicit_false_default():
-  @validated(skip_validation_by_default=False)
+  @validate(skip_validation_by_default=False)
   def process(data: Validated[pd.Series, Finite]):
     return data
 
@@ -468,7 +491,7 @@ def test_warn_only():
   """Test warn_only functionality and runtime overrides."""
 
   # Case 1: Default False, Override True
-  @validated(warn_only_by_default=False)
+  @validate(warn_only_by_default=False)
   def process_strict(data: Validated[pd.Series, Finite]):
     return data.sum()
 
@@ -489,7 +512,7 @@ def test_warn_only():
     logger.remove(handler_id)
 
   # Case 2: Default True, Override False
-  @validated(warn_only_by_default=True)
+  @validate(warn_only_by_default=True)
   def process_warn(data: Validated[pd.Series, Finite]):
     return data.sum()
 
@@ -507,7 +530,7 @@ class TestOptInStrictness:
   def test_nan_allowed_by_default(self):
     """Test that Validated allows NaN by default."""
 
-    @validated
+    @validate
     def process(data: Validated[pd.Series, None]):
       return data.sum()
 
@@ -517,7 +540,7 @@ class TestOptInStrictness:
   def test_empty_allowed_by_default(self):
     """Test that Validated allows empty data by default."""
 
-    @validated
+    @validate
     def process(data: Validated[pd.Series, None]):
       return len(data)
 
@@ -527,7 +550,7 @@ class TestOptInStrictness:
   def test_explicit_non_nan(self):
     """Test explicit NonNaN validator."""
 
-    @validated
+    @validate
     def process(data: Validated[pd.Series, NonNaN]):
       return data.sum()
 
@@ -541,7 +564,7 @@ class TestOptInStrictness:
   def test_explicit_non_empty(self):
     """Test explicit NonEmpty validator."""
 
-    @validated
+    @validate
     def process(data: Validated[pd.Series, NonEmpty]):
       return len(data)
 
@@ -555,8 +578,8 @@ class TestOptInStrictness:
   def test_markers_ignored(self):
     """Test that Nullable/MaybeEmpty markers are effectively ignored."""
 
-    @validated
-    def process(data: Validated[pd.Series, Nullable, MaybeEmpty]):
+    @validate
+    def process(data: Validated[pd.Series, None]):
       return len(data)
 
     # They shouldn't cause errors or strictness
@@ -566,7 +589,7 @@ class TestOptInStrictness:
   def test_has_column_defaults(self):
     """Test HasColumn allows NaN/Empty by default."""
 
-    @validated
+    @validate
     def process(data: Validated[pd.DataFrame, HasColumn("a")]):
       return data["a"].sum()
 
@@ -579,7 +602,7 @@ class TestOptInStrictness:
   def test_has_column_explicit_strict(self):
     """Test HasColumn with explicit strictness."""
 
-    @validated
+    @validate
     def process(
       data: Validated[pd.DataFrame, HasColumn("a", NonNaN, NonEmpty)],
     ):
@@ -596,7 +619,7 @@ class TestOptInStrictness:
   def test_mixed_column_validation(self):
     """Test mixed strict and lax columns."""
 
-    @validated
+    @validate
     def process(
       data: Validated[
         pd.DataFrame,
@@ -620,3 +643,127 @@ class TestOptInStrictness:
     })
     with pytest.raises(ValueError, match="must not contain NaN"):
       process(df_fail)
+
+
+class TestWarnOnlyEdgeCases:
+  """Tests for warn_only edge cases."""
+
+  def test_warn_only_type_mismatch(self):
+    @validate
+    def func(data: Validated[pd.Series, Finite]):
+      pass
+
+    # Pass list instead of Series -> TypeError
+    # With warn_only=True, should return None and log error
+    logs = []
+    handler_id = logger.add(logs.append, format="{message}")
+    try:
+      res = func([1, 2], warn_only=True)
+      assert res is None
+      assert any("Type mismatch" in str(m) for m in logs)
+    finally:
+      logger.remove(handler_id)
+
+  def test_warn_only_holistic_fail(self):
+    @validate
+    def func(data: Validated[pd.DataFrame, Shape(10, 10)]):
+      pass
+
+    df = pd.DataFrame({"a": [1]})
+    logs = []
+    handler_id = logger.add(logs.append, format="{message}")
+    try:
+      res = func(df, warn_only=True)  # pyright: ignore[reportCallIssue]
+      assert res is None
+      assert any("Validation failed" in str(m) for m in logs)
+      assert any("Shape" in str(m) for m in logs)
+    finally:
+      logger.remove(handler_id)
+
+  def test_warn_only_missing_columns(self):
+    @validate
+    def func(data: Validated[pd.DataFrame, HasColumns(["a", "b"])]):
+      pass
+
+    df = pd.DataFrame({"a": [1]})
+    logs = []
+    handler_id = logger.add(logs.append, format="{message}")
+    try:
+      res = func(df, warn_only=True)
+      assert res is None
+      assert any("Missing columns" in str(m) for m in logs)
+    finally:
+      logger.remove(handler_id)
+
+  def test_warn_only_list_based_fail(self):
+    class FailValidator(Validator[int]):
+      def validate(self, _data: int) -> None:
+        raise ValueError("Always fails")
+
+    # Trigger list-based path (non-pandas type)
+    @validate
+    def func(x: Validated[int, FailValidator]):
+      pass
+
+    logs = []
+    handler_id = logger.add(logs.append, format="{message}")
+    try:
+      res = func(1, warn_only=True)
+      assert res is None
+      assert any("Validation failed" in str(m) for m in logs)
+      assert any("FailValidator" in str(m) for m in logs)
+    finally:
+      logger.remove(handler_id)
+
+
+class TestParallelExecution:
+  """Tests for parallel execution path."""
+
+  def test_parallel_execution_path(self, monkeypatch):
+    # 1. Force parallel execution by lowering threshold
+    config = get_config()
+    monkeypatch.setattr(config, "parallel_threshold_rows", 0)
+
+    # 2. Reset lazy executor to pick up changes/ensure clean state
+    monkeypatch.setattr(decorator_module, "_shared_executor", None)
+
+    # 3. Define function with multiple arguments (condition for parallel)
+    @validate
+    def process_two(
+      _a: Validated[pd.Series, Positive], _b: Validated[pd.Series, Positive]
+    ):
+      return True
+
+    # 4. Call with valid data
+    s1 = pd.Series([1, 2, 3])
+    s2 = pd.Series([1, 2, 3])
+
+    # Should verify via coverage that parallel path was taken
+    assert process_two(s1, s2) is True
+
+    # 5. Call with invalid data (check exception propagation)
+    s_invalid = pd.Series([-1])
+    with pytest.raises(ValueError):
+      process_two(s_invalid, s2)
+
+    # 6. Call with multiple invalid data (first one should raise)
+    with pytest.raises(ValueError):
+      process_two(s_invalid, s_invalid)
+
+  def test_parallel_warn_only(self, monkeypatch):
+    # Test warn_only accumulation in parallel
+    config = get_config()
+    monkeypatch.setattr(config, "parallel_threshold_rows", 0)
+    monkeypatch.setattr(decorator_module, "_shared_executor", None)
+
+    @validate
+    def process_warn(
+      _a: Validated[pd.Series, Positive], _b: Validated[pd.Series, Positive]
+    ):
+      return True
+
+    s_invalid = pd.Series([-1])
+
+    # Should return None and log errors, but NOT raise
+    result = process_warn(s_invalid, s_invalid, warn_only=True)
+    assert result is None

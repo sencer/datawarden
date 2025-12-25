@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from validated import validated
-
 if TYPE_CHECKING:
-  from validated import Finite, Validated
+  from datawarden import Finite, Validated
+
+from datawarden import validate
 
 # Setup data
 data = pd.Series(np.random.randn(1000))
@@ -24,12 +24,13 @@ def raw_func(data: pd.Series) -> float:
 
 
 # 2. Decorated function
+@validate
 def decorated_func(data: "Validated[pd.Series, Finite]") -> float:
   return data.sum()
 
 
 # 3. Parallel validation function
-@validated
+@validate
 def parallel_func(
   a: "Validated[pd.DataFrame, Finite]", b: "Validated[pd.DataFrame, Finite]"
 ) -> bool:
@@ -81,7 +82,7 @@ def run_benchmarks() -> None:
   )
   t_manual = timeit.timeit(lambda: manual_func(df_large1, df_large2), number=n_parallel)
 
-  print(f"Parallel @validated (n={n_parallel}): {t_parallel:.4f}s")
+  print(f"Parallel @validate (n={n_parallel}): {t_parallel:.4f}s")
   print(f"Sequential Manual (n={n_parallel}): {t_manual:.4f}s")
 
   if t_manual > 0:

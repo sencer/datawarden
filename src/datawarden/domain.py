@@ -6,10 +6,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any  # pyright: ignore[reportExplicitAny]
 
 if TYPE_CHECKING:
-  from validated.base import Validator
+  from datawarden.base import Validator
 
-from validated.validators.comparison import Ge, Gt, Le, Lt
-from validated.validators.value import OneOf
+from datawarden.validators.comparison import Ge, Gt, Le, Lt
+from datawarden.validators.value import OneOf
 
 
 @dataclass
@@ -184,7 +184,6 @@ class ValidationDomain:
         domain.max_inclusive = False
     elif isinstance(v, OneOf):
       domain.allowed_values = v.allowed
-    # TODO: Add Finite, NonNaN handling if we map those to domain flags
 
     return domain
 

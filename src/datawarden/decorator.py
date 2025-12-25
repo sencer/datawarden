@@ -1,8 +1,8 @@
-"""The @validated decorator for automatic argument validation."""
+"""The @validate decorator for automatic argument validation."""
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+import concurrent.futures
 import contextlib
 import functools
 import inspect
@@ -20,14 +20,34 @@ from typing import (
 from loguru import logger
 import pandas as pd
 
-from validated.base import Validator
-from validated.exceptions import LogicError
-from validated.solver import resolve_domains
-from validated.utils import apply_default_validators, instantiate_validator
-from validated.validators.columns import HasColumn, HasColumns
-from validated.validators.comparison import Ge, Gt, Le, Lt
-from validated.validators.markers import MaybeEmpty, Nullable
-from validated.validators.value import NonEmpty, NonNaN, Shape
+from datawarden.base import Validator
+from datawarden.config import get_config
+from datawarden.exceptions import LogicError
+from datawarden.solver import resolve_domains
+from datawarden.utils import instantiate_validator, is_pandas_type
+from datawarden.validators.columns import HasColumn, HasColumns
+from datawarden.validators.comparison import Ge, Gt, Le, Lt
+from datawarden.validators.value import IgnoringNaNs, Rows, Shape
+
+_shared_executor: concurrent.futures.ThreadPoolExecutor | None = None
+
+
+def _get_executor() -> concurrent.futures.ThreadPoolExecutor:
+  """Get or create the shared thread pool executor (lazy initialization)."""
+  global _shared_executor
+  if _shared_executor is None:
+    _shared_executor = concurrent.futures.ThreadPoolExecutor(
+      max_workers=get_config().max_workers
+    )
+  return _shared_executor
+
+
+def _estimate_data_size(value: object) -> int:
+  """Estimate data size in rows for parallel threshold check."""
+  if isinstance(value, (pd.DataFrame, pd.Series, pd.Index)):
+    return len(value)
+  return 0
+
 
 if TYPE_CHECKING:
   from collections.abc import Callable
@@ -37,22 +57,24 @@ R = typing.TypeVar("R")
 
 
 @overload
-def validated[**P, R](
+def validate[**P, R](
   func: Callable[P, R],
 ) -> Callable[P, R]: ...
 
 
 @overload
-def validated[**P, R](
-  *, skip_validation_by_default: bool = False, warn_only_by_default: bool = False
+def validate[**P, R](
+  *,
+  skip_validation_by_default: bool | None = None,
+  warn_only_by_default: bool | None = None,
 ) -> Callable[[Callable[P, R]], Callable[P, R | None]]: ...
 
 
-def validated[**P, R](
+def validate[**P, R](
   func: Callable[P, R] | None = None,
   *,
-  skip_validation_by_default: bool = False,
-  warn_only_by_default: bool = False,
+  skip_validation_by_default: bool | None = None,
+  warn_only_by_default: bool | None = None,
 ) -> Callable[P, R | None] | Callable[[Callable[P, R]], Callable[P, R | None]]:
   """Decorator to validate function arguments based on Annotated types.
 
@@ -63,36 +85,13 @@ def validated[**P, R](
   Args:
     func: The function to decorate.
     skip_validation_by_default: If True, `skip_validation` defaults to True.
+      If None, defaults to the global configuration `skip_validation`.
     warn_only_by_default: If True, `warn_only` defaults to True. When `warn_only` is
       True, validation failures log an error and return None instead of raising.
+      If None, defaults to the global configuration `warn_only`.
 
   Returns:
     The decorated function with automatic validation support.
-
-  Example:
-    >>> from validated import validated, Validated, Finite
-    >>> import pandas as pd
-    >>>
-    >>> @validated
-    ... def process(data: Validated[pd.Series, Finite]):
-    ...     return data.sum()
-    >>>
-    >>> # Validation enabled by default
-    >>> result = process(valid_data)
-    >>>
-    >>> # Skip validation for performance
-    >>> result = process(valid_data, skip_validation=True)
-    >>>
-    >>> # Change default behavior
-    >>> @validated(skip_validation_by_default=True)
-    >>> def fast_process(data: Validated[pd.Series, Finite]):
-    ...     return data.sum()
-    >>>
-    >>> # Validation skipped by default
-    >>> result = fast_process(valid_data)
-    >>>
-    >>> # Enable validation explicitly
-    >>> result = fast_process(valid_data, skip_validation=False)
   """
 
   def decorator(  # noqa: PLR0914
@@ -133,45 +132,79 @@ def validated[**P, R](
             if v:
               raw_validators.append(v)
 
-          # Add defaults if not opted out
-          # Only apply defaults if the type is pandas Series/DataFrame
-          annotated_type = args[0]
-          is_pandas = False
-          try:
-            if issubclass(annotated_type, (pd.Series, pd.DataFrame)):
-              is_pandas = True
-          except TypeError:
-            # annotated_type might be a generic alias or something else
-            origin = get_origin(annotated_type)
-            if origin is not None:
-              if isinstance(origin, type) and issubclass(
-                origin, (pd.Series, pd.DataFrame)
-              ):
-                is_pandas = True
-            elif (
-              hasattr(annotated_type, "__module__")
-              and "pandas" in annotated_type.__module__
+          # 1. NEW: Unwrapping IgnoringNaNs wrapping HasColumn
+          # This fixes the bug where IgnoringNaNs(HasColumn(...)) was treated as a global validator
+          # and applied to every column of the DataFrame.
+          # We push IgnoringNaNs "inside" HasColumn.
+          optimized_validators = []
+          for v in raw_validators:
+            # Handle case where IgnoringNaNs wraps HasColumn/HasColumns
+            if isinstance(v, IgnoringNaNs) and isinstance(
+              v.wrapped, (HasColumn, HasColumns)
             ):
-              is_pandas = True
+              # Extract the inner HasColumn/HasColumns
+              inner = v.wrapped
+
+              # Create new validators list where each is wrapped in IgnoringNaNs
+              # IgnoringNaNs(v) -> v will now be applied to the Series/Column
+              new_validators = []
+              for sub in inner.validators:
+                if isinstance(sub, IgnoringNaNs):
+                  new_validators.append(sub)
+                else:
+                  new_validators.append(IgnoringNaNs(sub, _check_syntax=False))
+
+              # Reconstruct the HasColumn/HasColumns with new validators
+              if isinstance(inner, HasColumn):
+                new_v = HasColumn(inner.column, *new_validators)
+              else:
+                # HasColumns
+                new_v = HasColumns(inner.columns, *new_validators)
+
+              optimized_validators.append(new_v)
+
+            # Case: IgnoringNaNs() marker - needs to be handled later?
+            # No, marker handling stays the same (wrapping everything else).
+            else:
+              optimized_validators.append(v)
+
+          raw_validators = optimized_validators
+
+          # Check for IgnoringNaNs() marker and wrap all other validators
+          has_ignoring_nans_marker = any(
+            isinstance(v, IgnoringNaNs) and v.is_marker() for v in raw_validators
+          )
+          if has_ignoring_nans_marker:
+            wrapped_validators = []
+            for v in raw_validators:
+              if isinstance(v, IgnoringNaNs) and v.is_marker():
+                continue  # Skip the marker itself
+              if isinstance(v, IgnoringNaNs):
+                # Already wrapped, keep as-is
+                wrapped_validators.append(v)
+              else:
+                # Wrap with IgnoringNaNs
+                wrapped_validators.append(IgnoringNaNs(v, _check_syntax=False))
+            raw_validators = wrapped_validators
+
+          annotated_type = args[0]
+          is_pandas = is_pandas_type(annotated_type)
 
           # Filter and Process Validators
           if is_pandas:
-            # 1. Separate into Holistic, Column-Specific, and Global
+            # Separate into Holistic, Column-Specific, and Global
             holistic = []
             globals_list = []
             col_map: dict[str, list[Validator[Any]]] = {}
 
-            has_column_validator = False
-
             for v in raw_validators:
               if isinstance(v, (HasColumn, HasColumns)):
-                has_column_validator = True
                 cols = v.columns if isinstance(v, HasColumns) else [v.column]
 
                 # Instantiate internal validators
                 specs = []
                 for item in v.validators:
-                  inst = instantiate_validator(item)
+                  inst = instantiate_validator(item, _check_syntax=False)
                   if inst:
                     specs.append(inst)
 
@@ -180,37 +213,21 @@ def validated[**P, R](
                     col_map[str(col)] = []
                   col_map[str(col)].extend(specs)
 
-              elif isinstance(v, Shape) or (
+              elif isinstance(v, (Shape, Rows)) or (
                 isinstance(v, (Ge, Le, Gt, Lt)) and len(v.targets) > 1
               ):
                 holistic.append(v)
               else:
                 globals_list.append(v)
 
-            # Apply defaults to globals if applicable
-            # If HasColumn is used, we add Nullable/MaybeEmpty to GLOBALS
-            # so they can be overridden or intersected?
-            # Actually, if HasColumn is used, user likely wants loose defs elsewhere
-            # OR strict defaults elsewhere.
-            # Current logic: If HasColumn is present, we add Nullable/MaybeEmpty
-            # to the list before resolving defaults.
-
-            if has_column_validator:
-              # Implicitly allow defaults if specific columns are checked
-              # We append markers. Markers are NOT Validators, so they pass through resolve_domains
-              # But resolve_domains expects Validators.
-              # apply_default_validators filters based on markers in the list.
-              globals_list.append(Nullable())
-              globals_list.append(MaybeEmpty())
-
-            # Resolve Globals (apply defaults)
-            resolved_globals = apply_default_validators(globals_list)
+            # Resolve Globals
+            resolved_globals = list(globals_list)
             try:
               # Check for global contradictions (pass empty locals)
               resolved_globals = resolve_domains(resolved_globals, [])
-            except LogicError:
-              raise
             except Exception as e:
+              if isinstance(e, LogicError):
+                raise
               raise ValueError(
                 f"Global validation conflict in parameter '{name}': {e}"
               ) from e
@@ -218,44 +235,13 @@ def validated[**P, R](
             # Resolve Columns
             resolved_columns = {}
             for col, local_specs in col_map.items():
-              # Handle Markers for Locals
-              # If local specs has Nullable, remove NonNaN from Global context for this resolution
-              # If local specs has MaybeEmpty, remove NonEmpty
-
-              effective_globals = list(resolved_globals)  # Copy
-
-              # Optimization: Check markers without iterating full list?
-              # apply_default_validators handles the logic of "If Nullable is present, don't add NonNaN".
-              # But here resolved_globals ALREADY has NonNaN added.
-              # So we need to strip it if local says so.
-
-              if any(isinstance(s, Nullable) for s in local_specs):
-                effective_globals = [
-                  x for x in effective_globals if not isinstance(x, NonNaN)
-                ]
-              if any(isinstance(s, MaybeEmpty) for s in local_specs):
-                effective_globals = [
-                  x for x in effective_globals if not isinstance(x, NonEmpty)
-                ]
-
-              # Resolve locals (apply default validators to get standard ones if strictly typed?)
-              # Usually locals are just constraints. apply_default_validators only adds defaults
-              # if not present. If I say Gt(5), I still want NonNaN unless I say Nullable.
-              # So let's apply defaults to locals too?
-              # Re-think: "Locals merge with Globals".
-              # The Solver logic takes "Global Validators" and "Local Validators".
-              # We should pass `effective_globals` and `local_specs` to solver.
-
-              # But we need basic validators (NonNaN) in local_specs if they aren't in globals?
-              # No, globals provide the defaults.
-
-              # Resolve
+              # Resolve: globals apply unless they conflict with local specs
               try:
-                resolved = resolve_domains(effective_globals, local_specs)
+                resolved = resolve_domains(resolved_globals, local_specs)
                 resolved_columns[col] = resolved
-              except LogicError:
-                raise
               except Exception as e:
+                if isinstance(e, LogicError):
+                  raise
                 raise ValueError(
                   f"Validation conflict for column '{col}' in parameter '{name}': {e}"
                 ) from e
@@ -285,7 +271,7 @@ def validated[**P, R](
       value: Any,  # noqa: ANN401
       warn_only: bool,
     ) -> bool:
-      """Validate a single argument. Returns True if valid, False if warn_only triggered."""
+      """Validate a single argument. Returns is_valid."""
       # Check base type first (skip if value is None - Optional types allow None)
       if arg_name in arg_base_types and value is not None:
         expected_type = arg_base_types[arg_name]
@@ -298,7 +284,7 @@ def validated[**P, R](
         if is_valid_type and not isinstance(value, check_type):
           msg = (
             f"Type mismatch for parameter '{arg_name}' "
-            f"in '{func.__name__}': expected {expected_type.__name__}, "
+            f"in '{func.__name__}': expected {getattr(expected_type, '__name__', str(expected_type))}, "
             f"got {type(value).__name__}"
           )
           if warn_only:
@@ -314,17 +300,15 @@ def validated[**P, R](
           plan = validators
 
           # Common: Holistic Validators
-          v_name = "UnknownValidator"
-          try:
-            for v in plan["holistic"]:
-              v_name = type(v).__name__
+          for v in plan["holistic"]:
+            try:
               v.validate(value)
-          except Exception as e:
-            msg = f"Validation failed for parameter '{arg_name}' in '{func.__name__}' ({v_name}): {e}"
-            if warn_only:
-              logger.error(msg)
-              return False
-            raise type(e)(msg) from e
+            except Exception as e:
+              msg = f"Validation failed for parameter '{arg_name}' in '{func.__name__}' ({type(v).__name__}): {e}"
+              if warn_only:
+                logger.error(msg)
+                return False
+              raise type(e)(msg) from e
 
           # DataFrame Specifics
           if isinstance(value, pd.DataFrame):
@@ -360,6 +344,8 @@ def validated[**P, R](
                     return False
                   raise type(e)(msg) from e
 
+              pass
+
           elif isinstance(value, pd.Series):
             # Series uses 'default' validators (Globals) + Holistic (already ran)
             for v in plan["default"]:
@@ -391,13 +377,24 @@ def validated[**P, R](
 
     @functools.wraps(func)
     def wrapper(*args: P.args, **kwargs: P.kwargs) -> R | None:
+      # Resolve defaults
+      config = get_config()
+      effective_skip_default = (
+        skip_validation_by_default
+        if skip_validation_by_default is not None
+        else config.skip_validation
+      )
+      effective_warn_default = (
+        warn_only_by_default if warn_only_by_default is not None else config.warn_only
+      )
+
       # Check for skip_validation in kwargs
-      skip = kwargs.pop("skip_validation", skip_validation_by_default)
+      skip = kwargs.pop("skip_validation", effective_skip_default)
       if skip:
         return func(*args, **kwargs)
 
       # Check for warn_only in kwargs (explicit cast to bool for type checkers)
-      warn_only = bool(kwargs.pop("warn_only", warn_only_by_default))
+      warn_only = bool(kwargs.pop("warn_only", effective_warn_default))
 
       # Bind arguments
       bound_args = sig.bind(*args, **kwargs)
@@ -410,25 +407,41 @@ def validated[**P, R](
         if name in arg_base_types or name in arg_validators
       ]
 
-      # Validate arguments
-      if len(items_to_validate) > 1:
-        # Parallel validation for multiple arguments
-        with ThreadPoolExecutor(max_workers=len(items_to_validate)) as executor:
-          results = list(
-            executor.map(
-              lambda x: validate_arg(x[0], x[1], warn_only),  # pyright: ignore[reportUnknownLambdaType]
-              items_to_validate,
-            )
-          )
-          if warn_only and not all(results):
-            return None
-      elif items_to_validate:
-        # Sequential validation for single argument to avoid pool overhead
-        name, value = items_to_validate[0]
-        if not validate_arg(name, value, warn_only):
-          return None
+      def _handle_result(_: str, is_valid: bool) -> bool:
+        return not (not is_valid and warn_only)
 
-      return func(*args, **kwargs)
+      # Validate arguments - adaptive threading based on data size
+      # Only use parallel for multiple args with large data
+      total_rows = sum(_estimate_data_size(v) for _, v in items_to_validate)
+      use_parallel = (
+        len(items_to_validate) > 1
+        and total_rows >= get_config().parallel_threshold_rows
+      )
+
+      if use_parallel:
+        executor = _get_executor()
+        future_to_name = {
+          executor.submit(validate_arg, name, value, warn_only): name
+          for name, value in items_to_validate
+        }
+
+        for future in concurrent.futures.as_completed(future_to_name):
+          name = future_to_name[future]
+          try:
+            is_valid = future.result()
+          except Exception:
+            raise
+
+          if not _handle_result(name, is_valid):
+            return None
+      else:
+        # Sequential for single argument or small data (faster due to no threading overhead)
+        for name, value in items_to_validate:
+          is_valid = validate_arg(name, value, warn_only)
+          if not _handle_result(name, is_valid):
+            return None
+
+      return func(*bound_args.args, **bound_args.kwargs)
 
     return wrapper
 
