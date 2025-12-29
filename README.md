@@ -518,6 +518,17 @@ def simple_check(
     return (data["price"] * data["volume"]).sum()
 ```
 
+### State Independence
+
+When using stateful validators (like `MonoUp`, `NoTimeGaps`, or `MaxDiff`) across multiple columns via `HasColumns`, `datawarden` ensures that each column maintains its own independent state. This is handled automatically by cloning validator instances for each column, preventing state leakage and ensuring reliable validation.
+
+```python
+# 'a' and 'b' will each have their own independent MonoUp state
+@validate
+def process(df: Validated[pd.DataFrame, HasColumns(["a", "b"], MonoUp)]):
+    ...
+```
+
 ### Chaining Multiple Index Validators
 
 ```python

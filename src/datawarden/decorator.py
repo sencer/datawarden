@@ -71,9 +71,15 @@ def validate[**P, R](
 ) -> Callable[P, R | None] | Callable[[Callable[P, R]], Callable[P, R | None]]:
   """Decorator to validate function arguments based on Annotated types.
 
-  The decorator automatically adds a `skip_validation` parameter to the function.
-  When `skip_validation=False` (default), validation is performed. When
-  `skip_validation=True`, validation is skipped for maximum performance.
+  The decorator automatically adds a `skip_validation` parameter to the function
+  unless the function already defines it. When `skip_validation=False` (default),
+  validation is performed. When `skip_validation=True`, validation is skipped
+  for maximum performance.
+
+  Argument Collision:
+    If your function already has `skip_validation` or `warn_only` parameters,
+    the decorator will respect them and pass the values through to your function,
+    while still using them to control validation behavior.
 
   Validation features:
   - **Type Checking:** Runtime checks against Annotated base types.
