@@ -43,8 +43,6 @@ class NoTimeGaps(Validator[pd.Series | pd.Index]):
     data: Validated[pd.DataFrame, Index(NoTimeGaps("1min"))]
   """
 
-  is_chunkable = True
-
   def __init__(self, freq: str) -> None:
     super().__init__()
     self.freq = freq
@@ -111,8 +109,6 @@ class MaxGap(Validator[pd.Series | pd.Index]):
     # Validate index via Index wrapper
     data: Validated[pd.DataFrame, Index(MaxGap("5min"))]
   """
-
-  is_chunkable = True
 
   def __init__(self, max_gap: str) -> None:
     super().__init__()
@@ -182,8 +178,6 @@ class MaxDiff(Validator[pd.Series]):
     # Validate specific column
     data: Validated[pd.DataFrame, HasColumn("price", MaxDiff(5.0))]
   """
-
-  is_chunkable = True
 
   def __init__(self, max_diff: float | int) -> None:
     super().__init__()

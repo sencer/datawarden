@@ -55,6 +55,12 @@ class HasColumns(Validator[pd.DataFrame]):
         instantiated.append(v)
     self.validators = tuple(instantiated)
 
+  @property
+  @override
+  def is_chunkable(self) -> bool:
+    """Only chunkable if ALL inner validators are chunkable."""
+    return all(getattr(v, "is_chunkable", True) for v in self.validators)
+
   @override
   def validate(self, data: pd.DataFrame) -> None:
     if not isinstance(data, pd.DataFrame):
@@ -97,6 +103,12 @@ class HasColumn(Validator[pd.DataFrame]):
       if v:
         instantiated.append(v)
     self.validators = tuple(instantiated)
+
+  @property
+  @override
+  def is_chunkable(self) -> bool:
+    """Only chunkable if ALL inner validators are chunkable."""
+    return all(getattr(v, "is_chunkable", True) for v in self.validators)
 
   @override
   def validate(self, data: pd.DataFrame) -> None:

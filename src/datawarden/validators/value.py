@@ -433,7 +433,7 @@ class Is(Validator[pd.Series | pd.DataFrame | pd.Index]):
 
   def __init__(
     self,
-    predicate: Callable[[pd.Series], pd.Series],
+    predicate: Callable[[Any], Any],
     name: str | None = None,
   ) -> None:
     """Initialize Is validator.
@@ -463,12 +463,23 @@ class Is(Validator[pd.Series | pd.DataFrame | pd.Index]):
         raise ValueError(f"{msg} ({n_failed} values failed)")
 
     elif isinstance(data, pd.DataFrame):
-      for col in data.columns:
-        result = self.predicate(data[col])  # pyright: ignore[reportArgumentType]
-        if not result.all():
-          msg = self.name or f"Column '{col}' failed predicate check"
-          n_failed = (~result).sum()
+      result = self.predicate(data)
+      if not np.all(result):
+        msg = self.name or "DataFrame failed predicate check"
+        # For DataFrames, we can try to be more specific if it returned a mask
+        if isinstance(result, (pd.DataFrame, pd.Series)):
+          if isinstance(result, pd.DataFrame):
+            n_failed = (~result).sum().sum()
+            failed_cols = result.columns[(~result).any()].tolist()
+            if len(failed_cols) == 1:
+              msg = self.name or f"Column '{failed_cols[0]}' failed predicate check"
+            else:
+              msg = self.name or f"Columns {failed_cols} failed predicate check"
+          else:
+            n_failed = (~result).sum()
+
           raise ValueError(f"{msg} ({n_failed} values failed)")
+        raise ValueError(msg)
 
     elif isinstance(data, pd.Index):
       series = pd.Series(data)
@@ -488,19 +499,20 @@ class Rows(Validator[pd.DataFrame]):
     # Check each row sums to less than 100
     data: Validated[pd.DataFrame, Rows(lambda row: row.sum() < 100)]
 
-    # Check high >= low for each row
-    data: Validated[pd.DataFrame, Rows(lambda row: row["high"] >= row["low"])]
-
-    # With descriptive name
-    data: Validated[pd.DataFrame, Rows(
-      lambda row: row["close"] <= row["high"],
-      name="close must not exceed high"
-    )]
-
   Performance Note:
     This validator uses DataFrame.apply(axis=1) internally, which iterates
-    row-by-row in Python. For large DataFrames (>10k rows), consider using
-    column-based validators like Ge("high", "low") or vectorized Is() instead.
+    row-by-row in Python. For large DataFrames (>10k rows), it is significantly
+    slower than vectorized operations.
+
+  Optimization Example:
+    # ❌ SLOW: Row-wise (Python loop)
+    # Rows(lambda row: row["a"] + row["b"] == row["c"])
+
+    # ✅ FAST: Vectorized (Numpy/Pandas)
+    # Is(lambda df: df["a"] + df["b"] == df["c"])
+
+    Note: The vectorized version using Is() is much faster as it avoids
+    Python-level row iteration.
   """
 
   def __init__(
@@ -645,7 +657,10 @@ class Shape(Validator[pd.Series | pd.DataFrame | pd.Index]):
   For Series, only the first dimension (rows) is checked.
   """
 
-  is_chunkable = False
+  @property
+  @override
+  def is_chunkable(self) -> bool:
+    return False
 
   def __init__(
     self,

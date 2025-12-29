@@ -11,9 +11,13 @@ Validated = Annotated
 class Validator[T]:
   """Base class for validators."""
 
-  # Whether this validator can be safely applied to data chunks independently.
-  # Set to False for validators that check global properties (e.g. Unique, Shape).
-  is_chunkable: bool = True
+  @property
+  def is_chunkable(self) -> bool:
+    """Whether this validator can be safely applied to data chunks independently.
+
+    Set to False for validators that check global properties (e.g. Unique, Shape).
+    """
+    return True
 
   def reset(self) -> None:
     """Reset validator state for new validation run.

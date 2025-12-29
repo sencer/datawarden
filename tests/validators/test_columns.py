@@ -13,6 +13,7 @@ from datawarden import (
   IsDtype,
   MonoUp,
   Positive,
+  Unique,
 )
 
 
@@ -204,3 +205,23 @@ class TestHasColumn:
     validator = HasColumn("a")
     validator = HasColumn("a")
     assert validator.validate(df) is None
+
+
+class TestChunkability:
+  """Tests for is_chunkable property in column validators."""
+
+  def test_hascolumns_chunkability(self):
+    # Only chunkable validators
+    assert HasColumns(["a"], Finite, Positive).is_chunkable is True
+    # One non-chunkable validator
+    assert HasColumns(["a"], Finite, Unique).is_chunkable is False
+    # Only non-chunkable
+    assert HasColumns(["a"], Unique).is_chunkable is False
+
+  def test_hascolumn_chunkability(self):
+    # Only chunkable
+    assert HasColumn("a", Finite, Positive).is_chunkable is True
+    # One non-chunkable
+    assert HasColumn("a", Finite, Unique).is_chunkable is False
+    # No validators (presence check only)
+    assert HasColumn("a").is_chunkable is True
