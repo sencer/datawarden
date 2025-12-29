@@ -12,14 +12,43 @@ if TYPE_CHECKING:
 from datawarden.domain import ValidationDomain
 from datawarden.exceptions import LogicError
 from datawarden.validators.comparison import Ge, Gt, Le, Lt
-from datawarden.validators.value import OneOf
+from datawarden.validators.value import (
+  AllowInf,
+  AllowNaN,
+  Between,
+  Finite,
+  IgnoringNaNs,
+  NonNaN,
+  NonNegative,
+  OneOf,
+  Positive,
+  StrictFinite,
+)
 
 
 def is_domain_validator(
   v: Validator[Any],  # pyright: ignore[reportExplicitAny]
 ) -> bool:
   """Check if validator can be mapped to a domain."""
-  return isinstance(v, (Ge, Gt, Le, Lt, OneOf))
+  return isinstance(
+    v,
+    (
+      Ge,
+      Gt,
+      Le,
+      Lt,
+      OneOf,
+      Finite,
+      StrictFinite,
+      NonNaN,
+      IgnoringNaNs,
+      AllowNaN,
+      AllowInf,
+      Between,
+      NonNegative,
+      Positive,
+    ),
+  )
 
 
 def resolve_domains(
@@ -36,6 +65,7 @@ def resolve_domains(
   4. Intersect Local with Global.
      - If Intersection is Empty -> Local overrides Global (User Intent).
      - If Intersection is Valid -> Use Intersection.
+  5. Apply explicit local relaxations (AllowNaN, AllowInf).
   """
 
   # 1. Separate domain vs other validators
@@ -94,6 +124,15 @@ def resolve_domains(
   else:
     # No local domain constraints -> Inherit Global Domain
     final_domain = global_domain
+
+  # 5. Apply explicit local relaxations (Task 3)
+  # If local validators explicitly say "Allow", force it.
+  for v in domain_locals:
+    if isinstance(v, AllowNaN) or (isinstance(v, IgnoringNaNs) and v.is_marker()):
+      final_domain.allows_nan = True
+
+    if isinstance(v, AllowInf):
+      final_domain.allows_inf = True
 
   # 4. Convert back to validators
   return resolved_others + final_domain.to_validators()

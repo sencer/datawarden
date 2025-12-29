@@ -23,8 +23,9 @@ import pandas as pd
 from datawarden.base import Validator
 from datawarden.config import get_config
 from datawarden.exceptions import LogicError
+from datawarden.protocols import MetaValidator
 from datawarden.solver import resolve_domains
-from datawarden.utils import instantiate_validator, is_pandas_type
+from datawarden.utils import get_chunks, instantiate_validator, is_pandas_type
 from datawarden.validators.columns import HasColumn, HasColumns
 from datawarden.validators.comparison import Ge, Gt, Le, Lt
 from datawarden.validators.value import IgnoringNaNs, Rows, Shape
@@ -82,6 +83,14 @@ def validate[**P, R](
   When `skip_validation=False` (default), validation is performed. When
   `skip_validation=True`, validation is skipped for maximum performance.
 
+  Validation features:
+  - **Type Checking:** Runtime checks against Annotated base types.
+  - **Constraint Validation:** Applies all validators in the Annotated metadata.
+  - **Memory Efficiency:** Supports chunked validation for large datasets via
+    `config.chunk_size_rows`.
+  - **Parallelism:** Validates multiple large arguments in parallel threads
+    (unless chunking is active).
+
   Args:
     func: The function to decorate.
     skip_validation_by_default: If True, `skip_validation` defaults to True.
@@ -132,45 +141,9 @@ def validate[**P, R](
             if v:
               raw_validators.append(v)
 
-          # 1. NEW: Unwrapping IgnoringNaNs wrapping HasColumn
-          # This fixes the bug where IgnoringNaNs(HasColumn(...)) was treated as a global validator
-          # and applied to every column of the DataFrame.
-          # We push IgnoringNaNs "inside" HasColumn.
-          optimized_validators = []
-          for v in raw_validators:
-            # Handle case where IgnoringNaNs wraps HasColumn/HasColumns
-            if isinstance(v, IgnoringNaNs) and isinstance(
-              v.wrapped, (HasColumn, HasColumns)
-            ):
-              # Extract the inner HasColumn/HasColumns
-              inner = v.wrapped
-
-              # Create new validators list where each is wrapped in IgnoringNaNs
-              # IgnoringNaNs(v) -> v will now be applied to the Series/Column
-              new_validators = []
-              for sub in inner.validators:
-                if isinstance(sub, IgnoringNaNs):
-                  new_validators.append(sub)
-                else:
-                  new_validators.append(IgnoringNaNs(sub, _check_syntax=False))
-
-              # Reconstruct the HasColumn/HasColumns with new validators
-              if isinstance(inner, HasColumn):
-                new_v = HasColumn(inner.column, *new_validators)
-              else:
-                # HasColumns
-                new_v = HasColumns(inner.columns, *new_validators)
-
-              optimized_validators.append(new_v)
-
-            # Case: IgnoringNaNs() marker - needs to be handled later?
-            # No, marker handling stays the same (wrapping everything else).
-            else:
-              optimized_validators.append(v)
-
-          raw_validators = optimized_validators
-
-          # Check for IgnoringNaNs() marker and wrap all other validators
+          # 1. Handle Markers (e.g. IgnoringNaNs())
+          # Must be done BEFORE meta-validator expansion to allow markers to wrap other validators,
+          # which might then need expansion themselves (e.g. IgnoringNaNs(HasColumn)).
           has_ignoring_nans_marker = any(
             isinstance(v, IgnoringNaNs) and v.is_marker() for v in raw_validators
           )
@@ -186,6 +159,18 @@ def validate[**P, R](
                 # Wrap with IgnoringNaNs
                 wrapped_validators.append(IgnoringNaNs(v, _check_syntax=False))
             raw_validators = wrapped_validators
+
+          # 2. Expand MetaValidators
+          # MetaValidators (like IgnoringNaNs) can transform themselves into other validators.
+          # e.g., IgnoringNaNs(HasColumn(...)) -> HasColumn(..., IgnoringNaNs(...))
+          # This must run AFTER marker logic to handle implicit wrapping correctly.
+          optimized_validators = []
+          for v in raw_validators:
+            if isinstance(v, MetaValidator):
+              optimized_validators.extend(v.transform())
+            else:
+              optimized_validators.append(v)
+          raw_validators = optimized_validators
 
           annotated_type = args[0]
           is_pandas = is_pandas_type(annotated_type)
@@ -270,10 +255,12 @@ def validate[**P, R](
       arg_name: str,
       value: Any,  # noqa: ANN401
       warn_only: bool,
+      mode: str = "all",
     ) -> bool:
       """Validate a single argument. Returns is_valid."""
       # Check base type first (skip if value is None - Optional types allow None)
-      if arg_name in arg_base_types and value is not None:
+      # Only check type in "all" or "non-chunkable" modes to avoid redundant checks
+      if mode != "chunkable" and arg_name in arg_base_types and value is not None:
         expected_type = arg_base_types[arg_name]
         # Handle generic types by extracting origin
         check_type = get_origin(expected_type) or expected_type
@@ -301,6 +288,12 @@ def validate[**P, R](
 
           # Common: Holistic Validators
           for v in plan["holistic"]:
+            is_chunkable = getattr(v, "is_chunkable", True)
+            if mode == "chunkable" and not is_chunkable:
+              continue
+            if mode == "non-chunkable" and is_chunkable:
+              continue
+
             try:
               v.validate(value)
             except Exception as e:
@@ -312,8 +305,8 @@ def validate[**P, R](
 
           # DataFrame Specifics
           if isinstance(value, pd.DataFrame):
-            # 2. Check Missing Columns
-            if plan["has_col_checks"]:
+            # 2. Check Missing Columns (Only in non-chunkable or all)
+            if mode != "chunkable" and plan["has_col_checks"]:
               specified_cols = plan["columns"].keys()
               missing = [c for c in specified_cols if c not in value.columns]
               if missing:
@@ -335,6 +328,12 @@ def validate[**P, R](
 
               # Execute
               for v in active_v:
+                is_chunkable = getattr(v, "is_chunkable", True)
+                if mode == "chunkable" and not is_chunkable:
+                  continue
+                if mode == "non-chunkable" and is_chunkable:
+                  continue
+
                 try:
                   v.validate(col_data)
                 except Exception as e:
@@ -344,11 +343,15 @@ def validate[**P, R](
                     return False
                   raise type(e)(msg) from e
 
-              pass
-
           elif isinstance(value, pd.Series):
             # Series uses 'default' validators (Globals) + Holistic (already ran)
             for v in plan["default"]:
+              is_chunkable = getattr(v, "is_chunkable", True)
+              if mode == "chunkable" and not is_chunkable:
+                continue
+              if mode == "non-chunkable" and is_chunkable:
+                continue
+
               try:
                 v.validate(value)
               except Exception as e:
@@ -361,6 +364,12 @@ def validate[**P, R](
         # List-based validation (Legacy/Standard)
         elif isinstance(validators, list):
           for v in validators:
+            is_chunkable = getattr(v, "is_chunkable", True)
+            if mode == "chunkable" and not is_chunkable:
+              continue
+            if mode == "non-chunkable" and is_chunkable:
+              continue
+
             try:
               v.validate(value)
             except Exception as e:
@@ -400,6 +409,21 @@ def validate[**P, R](
       bound_args = sig.bind(*args, **kwargs)
       bound_args.apply_defaults()
 
+      # Reset all validators to clear any state from previous runs
+      for plan_or_list in arg_validators.values():
+        if isinstance(plan_or_list, dict):
+          # Plan: holistic, columns (dict of lists), default (list)
+          for v in plan_or_list["holistic"]:
+            v.reset()
+          for v_list in plan_or_list["columns"].values():
+            for v in v_list:
+              v.reset()
+          for v in plan_or_list["default"]:
+            v.reset()
+        elif isinstance(plan_or_list, list):
+          for v in plan_or_list:
+            v.reset()
+
       # Filter items that need validation
       items_to_validate = [
         (name, value)
@@ -410,18 +434,21 @@ def validate[**P, R](
       def _handle_result(_: str, is_valid: bool) -> bool:
         return not (not is_valid and warn_only)
 
+      chunk_size = config.chunk_size_rows
+
       # Validate arguments - adaptive threading based on data size
-      # Only use parallel for multiple args with large data
+      # Only use parallel for multiple args with large data, and when chunking is disabled
       total_rows = sum(_estimate_data_size(v) for _, v in items_to_validate)
       use_parallel = (
         len(items_to_validate) > 1
-        and total_rows >= get_config().parallel_threshold_rows
+        and total_rows >= config.parallel_threshold_rows
+        and chunk_size is None
       )
 
       if use_parallel:
         executor = _get_executor()
         future_to_name = {
-          executor.submit(validate_arg, name, value, warn_only): name
+          executor.submit(validate_arg, name, value, warn_only, "all"): name
           for name, value in items_to_validate
         }
 
@@ -435,11 +462,23 @@ def validate[**P, R](
           if not _handle_result(name, is_valid):
             return None
       else:
-        # Sequential for single argument or small data (faster due to no threading overhead)
+        # Sequential for single argument, small data, or when chunking is enabled
         for name, value in items_to_validate:
-          is_valid = validate_arg(name, value, warn_only)
-          if not _handle_result(name, is_valid):
-            return None
+          if chunk_size and isinstance(value, (pd.DataFrame, pd.Series, pd.Index)):
+            # 1. Non-chunkable (Full data) - includes type checks
+            is_valid = validate_arg(name, value, warn_only, mode="non-chunkable")
+            if not _handle_result(name, is_valid):
+              return None
+
+            # 2. Chunkable
+            for chunk in get_chunks(value, chunk_size):
+              is_valid = validate_arg(name, chunk, warn_only, mode="chunkable")
+              if not _handle_result(name, is_valid):
+                return None
+          else:
+            is_valid = validate_arg(name, value, warn_only, mode="all")
+            if not _handle_result(name, is_valid):
+              return None
 
       return func(*bound_args.args, **bound_args.kwargs)
 

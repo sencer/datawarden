@@ -5,6 +5,8 @@ from datawarden.validators.comparison import Ge, Gt, Le, Lt
 from datawarden.validators.gaps import MaxDiff, MaxGap, NoTimeGaps
 from datawarden.validators.index import Datetime, Index, MonoDown, MonoUp, Unique
 from datawarden.validators.value import (
+  AllowInf,
+  AllowNaN,
   Between,
   Finite,
   IgnoringNaNs,
@@ -20,6 +22,8 @@ from datawarden.validators.value import (
 )
 
 __all__ = [
+  "AllowInf",
+  "AllowNaN",
   "Between",
   "Datetime",
   "Finite",

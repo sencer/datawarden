@@ -9,7 +9,18 @@ if TYPE_CHECKING:
   from datawarden.base import Validator
 
 from datawarden.validators.comparison import Ge, Gt, Le, Lt
-from datawarden.validators.value import OneOf
+from datawarden.validators.value import (
+  AllowInf,
+  AllowNaN,
+  Between,
+  Finite,
+  IgnoringNaNs,
+  NonNaN,
+  NonNegative,
+  OneOf,
+  Positive,
+  StrictFinite,
+)
 
 
 @dataclass
@@ -170,20 +181,56 @@ class ValidationDomain:
       if len(v.targets) == 1 and isinstance(v.targets[0], (int, float)):
         domain.min_val = v.targets[0]
         domain.min_inclusive = True
+        domain.allows_nan = False
     elif isinstance(v, Gt):
       if len(v.targets) == 1 and isinstance(v.targets[0], (int, float)):
         domain.min_val = v.targets[0]
         domain.min_inclusive = False
+        domain.allows_nan = False
     elif isinstance(v, Le):
       if len(v.targets) == 1 and isinstance(v.targets[0], (int, float)):
         domain.max_val = v.targets[0]
         domain.max_inclusive = True
+        domain.allows_nan = False
     elif isinstance(v, Lt):
       if len(v.targets) == 1 and isinstance(v.targets[0], (int, float)):
         domain.max_val = v.targets[0]
         domain.max_inclusive = False
+        domain.allows_nan = False
     elif isinstance(v, OneOf):
       domain.allowed_values = v.allowed
+      domain.allows_nan = False
+    elif isinstance(v, Between):
+      domain.min_val = v.lower
+      domain.max_val = v.upper
+      domain.min_inclusive = v.lower_inclusive
+      domain.max_inclusive = v.upper_inclusive
+      domain.allows_nan = False
+    elif isinstance(v, Positive):
+      domain.min_val = 0
+      domain.min_inclusive = False
+      domain.allows_nan = False
+    elif isinstance(v, NonNegative):
+      domain.min_val = 0
+      domain.min_inclusive = True
+      domain.allows_nan = False
+    elif isinstance(v, Finite):
+      domain.allows_inf = False
+    elif isinstance(v, StrictFinite):
+      domain.allows_inf = False
+      domain.allows_nan = False
+    elif isinstance(v, NonNaN):
+      domain.allows_nan = False
+    elif isinstance(v, (IgnoringNaNs, AllowNaN)):
+      if isinstance(v, IgnoringNaNs) and v.wrapped is not None:
+        domain = cls.from_validator(v.wrapped)
+      domain.allows_nan = True
+    elif isinstance(v, AllowInf):
+      domain.allows_inf = True
+
+    # If validator has ignore_nan=True, allow NaNs
+    if getattr(v, "ignore_nan", False):
+      domain.allows_nan = True
 
     return domain
 
@@ -205,5 +252,23 @@ class ValidationDomain:
         vals.append(Le(self.max_val))
       else:
         vals.append(Lt(self.max_val))
+
+    # Apply Flags Logic
+    if self.allows_nan:
+      # If NaNs allowed, wrap strict validators
+      wrapped_vals: list[Validator[Any]] = [
+        IgnoringNaNs(v, _check_syntax=False) for v in vals
+      ]
+      vals = wrapped_vals
+
+      if not self.allows_inf:
+        vals.append(IgnoringNaNs(Finite, _check_syntax=False))
+    # Strict mode (NaNs not allowed)
+    # vals are already strict (Ge/Le check for NaN and fail)
+
+    elif not self.allows_inf:
+      vals.append(StrictFinite())
+    else:
+      vals.append(NonNaN())
 
     return vals

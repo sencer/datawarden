@@ -47,6 +47,8 @@ class Unique(Validator[pd.Series | pd.Index]):
   Can be applied directly to pd.Index or pd.Series values.
   """
 
+  is_chunkable = False
+
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
     if isinstance(data, pd.Index) and not data.is_unique:
@@ -58,35 +60,99 @@ class Unique(Validator[pd.Series | pd.Index]):
 class MonoUp(Validator[pd.Series | pd.Index]):
   """Validator for monotonically increasing values.
 
+  Supports Chunked Validation (Stateful):
+  When processing data in chunks, this validator maintains state (last value)
+  to ensure monotonicity is preserved across chunk boundaries.
+
   Use with Index(MonoUp) to apply to Series/DataFrame index.
   Can be applied directly to pd.Index or pd.Series values.
   """
 
+  is_chunkable = True
+
+  def __init__(self) -> None:
+    super().__init__()
+    self._last_val: Any = None
+
+  @override
+  def reset(self) -> None:
+    self._last_val = None
+
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
+    if len(data) == 0:
+      return
+
+    # 1. Check if first element is >= last element of previous chunk
+    if self._last_val is not None:
+      # Use index[0] for Index, or iloc[0] for Series
+      first_val = data[0] if isinstance(data, pd.Index) else data.iloc[0]
+      if first_val < self._last_val:
+        raise ValueError(
+          f"Monotonicity broken: first value of chunk ({first_val}) is less than last value of previous chunk ({self._last_val})"
+        )
+
+    # 2. Check monotonicity within chunk
     if isinstance(data, pd.Index) and not data.is_monotonic_increasing:
       raise ValueError("Values must be monotonically increasing")
     if isinstance(data, pd.Series) and not data.is_monotonic_increasing:
       raise ValueError("Values must be monotonically increasing")
 
+    # 3. Store last value for next chunk
+    self._last_val = data[-1] if isinstance(data, pd.Index) else data.iloc[-1]
+
 
 class MonoDown(Validator[pd.Series | pd.Index]):
   """Validator for monotonically decreasing values.
+
+  Supports Chunked Validation (Stateful):
+  When processing data in chunks, this validator maintains state (last value)
+  to ensure monotonicity is preserved across chunk boundaries.
 
   Use with Index(MonoDown) to apply to Series/DataFrame index.
   Can be applied directly to pd.Index or pd.Series values.
   """
 
+  is_chunkable = True
+
+  def __init__(self) -> None:
+    super().__init__()
+    self._last_val: Any = None
+
+  @override
+  def reset(self) -> None:
+    self._last_val = None
+
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
+    if len(data) == 0:
+      return
+
+    # 1. Check if first element is <= last element of previous chunk
+    if self._last_val is not None:
+      first_val = data[0] if isinstance(data, pd.Index) else data.iloc[0]
+      if first_val > self._last_val:
+        raise ValueError(
+          f"Monotonicity broken: first value of chunk ({first_val}) is greater than last value of previous chunk ({self._last_val})"
+        )
+
+    # 2. Check monotonicity within chunk
     if isinstance(data, pd.Index) and not data.is_monotonic_decreasing:
       raise ValueError("Values must be monotonically decreasing")
     if isinstance(data, pd.Series) and not data.is_monotonic_decreasing:
       raise ValueError("Values must be monotonically decreasing")
 
+    # 3. Store last value for next chunk
+    self._last_val = data[-1] if isinstance(data, pd.Index) else data.iloc[-1]
+
 
 class Index(Validator[pd.Series | pd.DataFrame | pd.Index]):
   """Validator for index properties.
+
+  Chunking Support:
+  - This wrapper is chunkable ONLY if all internal validators are chunkable.
+  - E.g., Index(MonoUp) IS chunkable.
+  - E.g., Index(Unique) IS NOT chunkable.
 
   Can be used to apply validators to the index:
   - Index(Datetime) - Check index is DatetimeIndex
@@ -105,6 +171,14 @@ class Index(Validator[pd.Series | pd.DataFrame | pd.Index]):
       if v:
         instantiated.append(v)
     self.validators = tuple(instantiated)
+    # Only chunkable if ALL inner validators are chunkable
+    self.is_chunkable = all(getattr(v, "is_chunkable", True) for v in self.validators)
+
+  @override
+  def reset(self) -> None:
+    """Reset all inner validators."""
+    for v in self.validators:
+      v.reset()
 
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:

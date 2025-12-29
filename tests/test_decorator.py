@@ -77,7 +77,9 @@ class TestValidatedDecorator:
     def my_func(prices: Validated[pd.Series, Finite]):
       return prices.sum()
 
-    with pytest.raises(ValueError, match=r"parameter 'prices'.*'my_func'.*Finite"):
+    with pytest.raises(
+      ValueError, match=r"parameter 'prices'.*'my_func'.*(Finite|IgnoringNaNs)"
+    ):
       my_func(pd.Series([1.0, np.inf]))
 
   def test_validation_can_be_disabled(self):
@@ -109,7 +111,7 @@ class TestValidatedDecorator:
       process(pd.Series([1.0, np.inf, 3.0]))
 
     # Fails Positive check
-    with pytest.raises(ValueError, match="must be positive"):
+    with pytest.raises(ValueError, match=r"(must be positive|Data must be > 0)"):
       process(pd.Series([1.0, 0.0, 3.0]))
 
   def test_dataframe_validation(self):
@@ -306,7 +308,7 @@ class TestComplexValidations:
     assert len(result) == 4
 
     # Zero price fails Positive check
-    with pytest.raises(ValueError, match="must be positive"):
+    with pytest.raises(ValueError, match=r"(must be positive|Data must be > 0)"):
       calculate_returns(pd.Series([100.0, 0.0, 101.0]))
 
     # Inf price fails Finite check (Finite now only rejects Inf, not NaN)
@@ -327,7 +329,7 @@ class TestComplexValidations:
     assert process(df) == 4.0
 
     # Negative value should still fail (after skipping NaNs)
-    with pytest.raises(ValueError, match="must be positive"):
+    with pytest.raises(ValueError, match=r"(must be positive|Data must be > 0)"):
       process(pd.DataFrame({"a": [1.0, np.nan, -1.0]}))
 
 
