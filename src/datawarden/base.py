@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Annotated, override
 
 # Validated alias for Annotated - the main type hint for validated parameters
@@ -10,6 +11,15 @@ Validated = Annotated
 
 class Validator[T]:
   """Base class for validators."""
+
+  def clone(self) -> Validator[T]:
+    """Return a fresh copy of this validator with the same configuration.
+
+    The state of the validator (if any) is reset in the clone.
+    """
+    new_v = copy.deepcopy(self)
+    new_v.reset()
+    return new_v
 
   @property
   def is_chunkable(self) -> bool:

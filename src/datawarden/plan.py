@@ -137,7 +137,9 @@ class ValidationPlanBuilder:
         for col in cols:
           if str(col) not in col_map:
             col_map[str(col)] = []
-          col_map[str(col)].extend(specs)
+          # Clone specs for each column to avoid state sharing
+          cloned_specs = [v.clone() for v in specs]
+          col_map[str(col)].extend(cloned_specs)
 
       elif isinstance(v, (Shape, Rows, Is)) or (
         isinstance(v, (Ge, Le, Gt, Lt)) and len(v.targets) > 1

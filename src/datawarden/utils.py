@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, get_origin
 
+import numpy as np
 import pandas as pd
 
 from datawarden.base import Validator
 
 if TYPE_CHECKING:
   from collections.abc import Iterator
-
-  import numpy as np
 
 
 def get_chunks(
@@ -136,23 +135,30 @@ def report_failures(
   # Extract failing indices (limit to 5)
   try:
     if isinstance(data, (pd.Series, pd.Index)):
-      # For Index, we need to handle it carefully as it doesn't support boolean indexing same way always
+      # Handle both Series/Index with either boolean Series/Index or numpy mask
       if isinstance(data, pd.Index):
-        # Convert to Series to safely get index of failures
-        # If data IS the index, the "index" of failures is the values themselves?
-        # Or the integer position? Usually index validation implies checking index values.
+        # Convert to Series to safely get index of failures if needed,
+        # but for Index itself, we usually want the values.
         failures = data[mask].tolist()[:5]  # pyright: ignore[reportArgumentType]
       else:
-        # Series
+        # Series - mask can be Series or ndarray
         failures = data[mask].index.tolist()[:5]  # pyright: ignore[reportAttributeAccessIssue]
     # DataFrame
-    # Stack to get (index, column) pairs
-    elif isinstance(mask, pd.DataFrame):
-      failures = mask.stack()[mask.stack()].index.tolist()[:5]  # pyright: ignore
+    elif isinstance(data, pd.DataFrame):
+      if isinstance(mask, pd.DataFrame):
+        # Stack to get (index, column) pairs
+        failures = mask.stack()[mask.stack()].index.tolist()[:5]  # pyright: ignore
+      else:
+        # Numpy mask on DataFrame - usually from vectorized checks
+        # Try to find which rows/cols failed
+        rows, cols = np.where(mask)
+        failures = []
+        for r, c in zip(rows[:5], cols[:5], strict=False):
+          failures.append((data.index[r], data.columns[c]))
     else:
       failures = ["(unknown indices)"]
-  except Exception:  # noqa: BLE001
+  except Exception as e:  # noqa: BLE001
     # Fallback if index extraction fails
-    failures = ["(error extracting indices)"]
+    failures = [f"(error extracting indices: {e})"]
 
   raise ValueError(f"{msg} ({n_failed} violations. Examples: {failures})")

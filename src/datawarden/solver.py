@@ -79,7 +79,8 @@ def resolve_domains(
   # Map type -> validator. Local overrides Global.
   other_map = {type(v): v for v in global_others}
   other_map.update({type(v): v for v in local_others})
-  resolved_others = list(other_map.values())
+  # Clone them to ensure each column gets its own stateful instance
+  resolved_others = [v.clone() for v in other_map.values()]
 
   # 2. Build Domains
   # Combine all globals into one domain
