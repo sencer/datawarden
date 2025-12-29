@@ -85,11 +85,11 @@ def is_pandas_type(annotated_type: object) -> bool:
     annotated_type: The type to check.
 
   Returns:
-    True if the type is a pandas Series or DataFrame, False otherwise.
+    True if the type is a pandas Series, DataFrame or Index, False otherwise.
   """
   try:
     if isinstance(annotated_type, type) and issubclass(
-      annotated_type, (pd.Series, pd.DataFrame)
+      annotated_type, (pd.Series, pd.DataFrame, pd.Index)
     ):
       return True
   except TypeError:
@@ -99,7 +99,9 @@ def is_pandas_type(annotated_type: object) -> bool:
   origin = get_origin(annotated_type)
   if origin is not None:
     try:
-      if isinstance(origin, type) and issubclass(origin, (pd.Series, pd.DataFrame)):
+      if isinstance(origin, type) and issubclass(
+        origin, (pd.Series, pd.DataFrame, pd.Index)
+      ):
         return True
     except TypeError:
       pass
@@ -108,7 +110,12 @@ def is_pandas_type(annotated_type: object) -> bool:
   if hasattr(annotated_type, "__module__"):
     module = getattr(annotated_type, "__module__", "")
     # Only match if it's the actual pandas module (not third-party extensions)
-    if module in {"pandas.core.frame", "pandas.core.series"}:
+    if module in {
+      "pandas.core.frame",
+      "pandas.core.series",
+      "pandas.core.indexes.base",
+      "pandas.core.indexes.datetimes",
+    }:
       return True
 
   return False

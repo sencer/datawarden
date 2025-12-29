@@ -43,6 +43,9 @@ class IgnoringNaNs(Validator[pd.Series | pd.DataFrame | pd.Index], MetaValidator
      data: Validated[pd.Series, Ge(0), Lt(10), IgnoringNaNs()]
      # Equivalent to: IgnoringNaNs(Ge(0)), IgnoringNaNs(Lt(10))
 
+  The wrapper correctly preserves data types, supporting pd.Series, pd.DataFrame,
+  and pd.Index (including nested index validators like Index(Datetime)).
+
   Example:
     # Allow NaN values but enforce that non-NaN values are >= 0
     data: Validated[pd.Series, IgnoringNaNs(Ge(0))]
@@ -122,9 +125,9 @@ class IgnoringNaNs(Validator[pd.Series | pd.DataFrame | pd.Index], MetaValidator
     elif isinstance(data, pd.Index):
       # For Index, filter and validate
       mask = ~pd.isna(data)
-      if mask.any():  # pyright: ignore[reportGeneralTypeIssues]
-        # Create temporary series for validation
-        filtered = pd.Series(data[mask], dtype=data.dtype)
+      if mask.any():
+        # Preserve Index type when filtering
+        filtered = data[mask]
         self.wrapped.validate(filtered)
 
 

@@ -6,7 +6,18 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from datawarden import Finite, Ge, IgnoringNaNs, Le, Lt, NonNegative, Positive, validate
+from datawarden import (
+  Datetime,
+  Finite,
+  Ge,
+  IgnoringNaNs,
+  Index,
+  Le,
+  Lt,
+  NonNegative,
+  Positive,
+  validate,
+)
 
 
 class TestIgnoringNaNsWrapper:
@@ -185,6 +196,13 @@ class TestIgnoringNaNsWrapper:
     idx = pd.Index([np.nan, np.nan, np.nan])
     validator = IgnoringNaNs(Ge(0))
     idx = pd.Index([np.nan, np.nan, np.nan])
+    assert validator.validate(idx) is None
+
+  def test_with_index_and_datetime(self):
+    """Regression test: IgnoringNaNs(Index(Datetime)) on Index with NaTs."""
+    validator = IgnoringNaNs(Index(Datetime))
+    # Index with NaT
+    idx = pd.to_datetime(["2024-01-01", "NaT", "2024-01-03"])
     assert validator.validate(idx) is None
 
 

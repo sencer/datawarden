@@ -2,10 +2,11 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportCallIssue=false, reportAttributeAccessIssue=false
 
+import numpy as np
 import pandas as pd
 import pytest
 
-from datawarden import HasColumn, Index, MaxDiff, MaxGap, NoTimeGaps
+from datawarden import HasColumn, IgnoringNaNs, Index, MaxDiff, MaxGap, NoTimeGaps
 
 
 class TestNoTimeGaps:
@@ -245,5 +246,23 @@ class TestMaxDiff:
     """Test MaxDiff with single value passes."""
     data = pd.Series([42])
     validator = MaxDiff(5)
-    validator = MaxDiff(5)
     assert validator.validate(data) is None
+
+  def test_maxdiff_fails_on_nan_by_default(self):
+    """Test MaxDiff fails on data with NaNs by default."""
+    data = pd.Series([1.0, 2.0, np.nan, 3.0])
+    validator = MaxDiff(5)
+    with pytest.raises(ValueError, match="MaxDiff cannot validate data with NaN"):
+      validator.validate(data)
+
+  def test_maxdiff_with_ignoring_nans(self):
+    """Test MaxDiff with IgnoringNaNs wrapper."""
+    # [1.0, NaN, 4.0] -> jumps [1.0, 4.0] -> diff 3 <= 5 -> Pass
+    data = pd.Series([1.0, float("nan"), 4.0])
+    validator = IgnoringNaNs(MaxDiff(5))
+    assert validator.validate(data) is None
+
+    # [1.0, NaN, 10.0] -> jumps [1.0, 10.0] -> diff 9 > 5 -> Fail
+    data_large = pd.Series([1.0, float("nan"), 10.0])
+    with pytest.raises(ValueError, match="Difference exceeds maximum 5"):
+      validator.validate(data_large)

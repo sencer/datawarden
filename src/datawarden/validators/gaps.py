@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from datawarden.base import Validator
+from datawarden.utils import report_failures
 
 
 def _get_datetime_array(
@@ -169,19 +170,26 @@ class MaxDiff(Validator[pd.Series]):
   Maintains the last value of the previous chunk to ensure jumps across
   chunk boundaries do not exceed the limit.
 
+  Behavior regarding NaNs:
+  - By default (ignore_nan=False), it fails if any NaN values are present.
+  - If ignore_nan=True (or wrapped in IgnoringNaNs), it drops NaNs and
+    validates differences between the remaining consecutive values. This
+    allows detecting large "jumps" across missing data points.
+
   Useful for validating that numeric data doesn't have large jumps.
 
   Example:
-    # Price changes must be at most 10
+    # Price changes must be at most 10 (fails on NaNs)
     data: Validated[pd.Series, MaxDiff(10.0)]
 
-    # Validate specific column
-    data: Validated[pd.DataFrame, HasColumn("price", MaxDiff(5.0))]
+    # Price changes must be at most 10 (ignores NaNs)
+    data: Validated[pd.Series, IgnoringNaNs(MaxDiff(10.0))]
   """
 
-  def __init__(self, max_diff: float | int) -> None:
+  def __init__(self, max_diff: float | int, ignore_nan: bool = False) -> None:
     super().__init__()
     self.max_diff = max_diff
+    self.ignore_nan = ignore_nan
     self._last_val: float | int | None = None
 
   @override
@@ -190,7 +198,14 @@ class MaxDiff(Validator[pd.Series]):
 
   @override
   def __repr__(self) -> str:
-    return f"MaxDiff({self.max_diff!r})"
+    args = [repr(self.max_diff)]
+    if self.ignore_nan:
+      args.append("ignore_nan=True")
+    return f"MaxDiff({', '.join(args)})"
+
+  def with_ignore_nan(self) -> MaxDiff:
+    """Return a copy of this validator that ignores NaN values."""
+    return MaxDiff(self.max_diff, ignore_nan=True)
 
   @override
   def validate(self, data: pd.Series) -> None:
@@ -200,20 +215,32 @@ class MaxDiff(Validator[pd.Series]):
     if not pd.api.types.is_numeric_dtype(data.dtype):
       raise ValueError("MaxDiff requires numeric data")
 
-    if len(data) == 0:
+    # Check for NaN values first
+    if not self.ignore_nan and data.isna().any():
+      mask = data.isna()
+      report_failures(
+        data,
+        mask,
+        "MaxDiff cannot validate data with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
+      )
+
+    # If ignoring NaNs, drop them before calculating diffs
+    working_data = data.dropna() if self.ignore_nan else data
+
+    if len(working_data) == 0:
       return
 
     # Check diff from previous chunk
     if self._last_val is not None:
-      actual_diff = float(np.abs(data.iloc[0] - self._last_val))
+      actual_diff = float(np.abs(working_data.iloc[0] - self._last_val))
       if actual_diff > self.max_diff:
         raise ValueError(
           f"Difference exceeds maximum {self.max_diff} (found diff of {actual_diff})"
         )
 
-    if len(data) > 1:
+    if len(working_data) > 1:
       # Use absolute difference for numeric data
-      diffs = np.abs(np.diff(data.values))  # type: ignore[arg-type]
+      diffs = np.abs(np.diff(working_data.values))  # type: ignore[arg-type]
 
       if np.any(diffs > self.max_diff):
         max_found = float(np.max(diffs))
@@ -222,4 +249,4 @@ class MaxDiff(Validator[pd.Series]):
         )
 
     # Store last value
-    self._last_val = data.iloc[-1]
+    self._last_val = working_data.iloc[-1]
