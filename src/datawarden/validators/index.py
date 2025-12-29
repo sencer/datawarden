@@ -161,10 +161,10 @@ class Index(Validator[pd.Series | pd.DataFrame | pd.Index]):
 
   def __init__(
     self,
-    *validators: Validator[Any] | type[Validator[Any]],  # type: ignore[misc]
+    *validators: Validator[Any] | type[Validator[Any]],
   ) -> None:
     super().__init__()
-    instantiated: list[Validator[Any]] = []  # pyright: ignore[reportExplicitAny]
+    instantiated: list[Validator[Any]] = []
     for v_item in validators:
       v = instantiate_validator(v_item)
       if v:

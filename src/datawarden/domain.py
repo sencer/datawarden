@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any  # pyright: ignore[reportExplicitAny]
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
   from datawarden.base import Validator
@@ -31,7 +31,7 @@ class ValidationDomain:
   max_val: float | int | None = None
   min_inclusive: bool = True
   max_inclusive: bool = True
-  allowed_values: set[Any] | None = None  # pyright: ignore[reportExplicitAny]
+  allowed_values: set[Any] | None = None
   # Disallowed values (like inf, NaN) are implicitly handled by the absence
   # from domain or explicit checks, but for intersection we focus on ranges and sets.
   # We might need to track "no NaN" separately if we want to merge that logic.
@@ -127,7 +127,7 @@ class ValidationDomain:
 
     return new_domain
 
-  def is_subset(self, other: ValidationDomain) -> bool:  # noqa: PLR0911
+  def is_subset(self, other: ValidationDomain) -> bool:
     """Check if self is a subset of other."""
     # Simple implementation for now
     # 1. Check flags
@@ -171,7 +171,7 @@ class ValidationDomain:
   @classmethod
   def from_validator(
     cls,
-    v: Validator[Any],  # pyright: ignore[reportExplicitAny]
+    v: Validator[Any],
   ) -> ValidationDomain:
     """Convert a Validator instance to a Domain."""
     domain = cls()
@@ -234,7 +234,7 @@ class ValidationDomain:
 
     return domain
 
-  def to_validators(self) -> list[Validator[Any]]:  # pyright: ignore[reportExplicitAny]
+  def to_validators(self) -> list[Validator[Any]]:
     """Convert domain back to validators."""
     vals: list[Validator[Any]] = []
 

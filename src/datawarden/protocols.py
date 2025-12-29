@@ -27,7 +27,7 @@ class MetaValidator(Protocol):
   They can modify, unwrap, or replace validators in the chain.
   """
 
-  def transform(self) -> list["Validator[Any]"]:  # pyright: ignore[reportExplicitAny]
+  def transform(self) -> list["Validator[Any]"]:
     """Transform this validator into one or more concrete validators.
 
     Returns:

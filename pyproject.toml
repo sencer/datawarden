@@ -28,6 +28,7 @@ dev = [
     "build>=0.10.0", # Added for package building
     "twine>=4.0.0", # Added for package distribution checking and uploading
     "pyarrow>=14.0.0", # For testing PyArrow-backed dtypes
+    "pandas-stubs>=2.0.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -103,6 +104,16 @@ max-complexity = 10  # Maximum cyclomatic complexity
 "__init__.py" = [
     "F401",    # Allow unused imports in __init__.py
 ]
+"src/datawarden/decorator.py" = [
+    "PLR0911", # Too many return statements (idiomatic for validation dispatch)
+    "ANN401",  # Any-typed value for validation
+]
+"src/datawarden/domain.py" = [
+    "PLR0911", # Too many return statements (idiomatic for subset checks)
+]
+"src/datawarden/config.py" = [
+    "ANN401",  # Any-typed overrides
+]
 "tests/**/*.py" = [
     "S101",    # Allow assert in tests
     "PLR2004", # Allow magic values in tests
@@ -111,10 +122,12 @@ max-complexity = 10  # Maximum cyclomatic complexity
     "ANN",     # Don't require annotations in tests
     "FBT",     # Allow boolean args in tests
     "D",       # Don't require docstrings in tests
+    "TCH",     # Allow type-checking imports at top-level (runtime use in Validated)
 ]
 "benchmarks/**/*.py" = [
     "T201",    # Allow print statements in benchmarks
     "ANN",     # Don't require annotations in benchmarks
+    "TCH",     # Allow type-checking imports at top-level
 ]
 
 [tool.ruff.lint.isort]
@@ -127,6 +140,7 @@ convention = "google"
 
 [tool.ruff.lint.flake8-type-checking]
 strict = true
+runtime-evaluated-decorators = ["datawarden.validate"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -217,6 +231,7 @@ reportUnnecessaryTypeIgnoreComment = false  # Relax: gradual cleanup
 # FUNCTION/METHOD SIGNATURE STRICTNESS
 # ============================================================
 reportGeneralTypeIssues = true
+reportArgumentType = true
 reportPropertyTypeMismatch = true
 reportFunctionMemberAccess = true
 reportCallInDefaultInitializer = true
