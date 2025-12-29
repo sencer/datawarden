@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import operator
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, cast, override
 
 import numpy as np
 import pandas as pd
@@ -11,7 +11,7 @@ import pandas as pd
 if TYPE_CHECKING:
   from collections.abc import Callable
 from datawarden.base import Validator
-from datawarden.utils import report_failures
+from datawarden.utils import report_failures, scalar_any
 
 
 class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
@@ -45,7 +45,7 @@ class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
   def check(self, value: int) -> bool:
     """Check constraint for a scalar integer (used by Shape validator)."""
     if len(self.targets) == 1 and isinstance(self.targets[0], (int, float)):
-      return self.op_func(value, self.targets[0])  # pyright: ignore[reportCallIssue,reportArgumentType]
+      return bool((self.op_func)(value, self.targets[0]))  # type: ignore
     return False
 
   def describe(self) -> str:
@@ -72,9 +72,12 @@ class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
       # Unary comparison: data op target
       target = self.targets[0]
       if isinstance(data, (pd.Series, pd.DataFrame, pd.Index)):
-        mask = self.opposite_op_func(data.values, target)  # pyright: ignore[reportCallIssue,reportArgumentType]
-        if np.any(mask):
-          report_failures(data, mask, f"Data must be {self.op_symbol} {target}")  # pyright: ignore[reportArgumentType]
+        # Use cast to Any to avoid stub mismatch with operator functions
+        mask = (self.opposite_op_func)(data.values, target)  # type: ignore
+        if scalar_any(cast("Any", mask)):
+          report_failures(
+            data, cast("Any", mask), f"Data must be {self.op_symbol} {target}"
+          )
     else:
       # Column comparison: col1 op col2 op col3 ...
       if not isinstance(data, pd.DataFrame):
@@ -94,9 +97,11 @@ class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
 
         col1_vals = data[col1].values
         col2_vals = data[col2].values
-        mask = self.opposite_op_func(col1_vals, col2_vals)  # pyright: ignore[reportCallIssue,reportArgumentType]
-        if np.any(mask):
-          report_failures(data, mask, f"{col1} must be {self.op_symbol} {col2}")  # pyright: ignore[reportArgumentType]
+        mask = (self.opposite_op_func)(col1_vals, col2_vals)  # type: ignore
+        if scalar_any(cast("Any", mask)):
+          report_failures(
+            data, cast("Any", mask), f"{col1} must be {self.op_symbol} {col2}"
+          )
 
 
 class Ge(_ComparisonValidator):

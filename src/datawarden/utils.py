@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, get_origin
+from typing import TYPE_CHECKING, Any, cast, get_origin
 
 import numpy as np
 import pandas as pd
@@ -38,7 +38,7 @@ def instantiate_validator(
   item: object,
   *,
   _check_syntax: bool = True,
-) -> Validator[Any] | None:  # pyright: ignore[reportExplicitAny]
+) -> Validator[Any] | None:
   """Helper to instantiate a validator from a type or instance.
 
   Args:
@@ -120,14 +120,32 @@ def is_pandas_type(annotated_type: object) -> bool:
   return False
 
 
+def scalar_any(data: pd.Series | pd.DataFrame | pd.Index | np.ndarray) -> bool:
+  """Check if any value is True across Series, DataFrame, Index, or Array.
+
+  Handles axis=None for DataFrames and standard .any() for others.
+  """
+  if isinstance(data, pd.DataFrame):
+    return bool(data.any(axis=None))
+  if isinstance(data, (pd.Series, pd.Index, np.ndarray)):
+    return bool(np.any(data))
+  return bool(data)
+
+
 def report_failures(
   data: pd.Series | pd.DataFrame | pd.Index,
-  mask: pd.Series | pd.DataFrame | np.ndarray,  # pyright: ignore[reportExplicitAny]
+  mask: pd.Series | pd.DataFrame | pd.Index | np.ndarray,
   msg: str,
 ) -> None:
   """Report validation failures with context."""
   # Calculate number of failures
-  n_failed = mask.sum().sum() if isinstance(mask, pd.DataFrame) else mask.sum()
+  n_failed = (
+    mask.sum().sum()
+    if isinstance(mask, pd.DataFrame)
+    else int(np.sum(mask))
+    if isinstance(mask, (pd.Index, np.ndarray))
+    else mask.sum()
+  )
 
   if n_failed == 0:
     return
@@ -139,15 +157,19 @@ def report_failures(
       if isinstance(data, pd.Index):
         # Convert to Series to safely get index of failures if needed,
         # but for Index itself, we usually want the values.
-        failures = data[mask].tolist()[:5]  # pyright: ignore[reportArgumentType]
+        failures: list[Any] = data[cast("Any", mask)].tolist()[:5]
+      # Series - mask can be Series, Index or ndarray
+      # Use numpy-style indexing if it's a mask
+      elif isinstance(mask, (pd.Series, pd.Index)):
+        failures = data[cast("Any", mask)].index.tolist()[:5]
       else:
-        # Series - mask can be Series or ndarray
-        failures = data[mask].index.tolist()[:5]  # pyright: ignore[reportAttributeAccessIssue]
+        failures = data.index[cast("Any", mask)].tolist()[:5]
     # DataFrame
     elif isinstance(data, pd.DataFrame):
       if isinstance(mask, pd.DataFrame):
         # Stack to get (index, column) pairs
-        failures = mask.stack()[mask.stack()].index.tolist()[:5]  # pyright: ignore
+        m = cast("Any", mask)
+        failures = m.stack()[m.stack()].index.tolist()[:5]
       else:
         # Numpy mask on DataFrame - usually from vectorized checks
         # Try to find which rows/cols failed

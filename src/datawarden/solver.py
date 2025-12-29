@@ -27,7 +27,7 @@ from datawarden.validators.value import (
 
 
 def is_domain_validator(
-  v: Validator[Any],  # pyright: ignore[reportExplicitAny]
+  v: Validator[Any],
 ) -> bool:
   """Check if validator can be mapped to a domain."""
   return isinstance(
@@ -52,9 +52,9 @@ def is_domain_validator(
 
 
 def resolve_domains(
-  global_validators: Sequence[Validator[Any]],  # pyright: ignore[reportExplicitAny]
-  local_validators: Sequence[Validator[Any]],  # pyright: ignore[reportExplicitAny]
-) -> list[Validator[Any]]:  # pyright: ignore[reportExplicitAny]
+  global_validators: Sequence[Validator[Any]],
+  local_validators: Sequence[Validator[Any]],
+) -> list[Validator[Any]]:
   """
   Resolve potential conflicts between global and local validators.
 

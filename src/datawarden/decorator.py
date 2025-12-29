@@ -111,9 +111,9 @@ def validate[**P, R](
     builder = ValidationPlanBuilder(func)
     arg_validators, arg_base_types = builder.build()
 
-    def validate_arg(  # noqa: PLR0911
+    def validate_arg(
       arg_name: str,
-      value: Any,  # noqa: ANN401
+      value: Any,
       warn_only: bool,
       mode: str = "all",
     ) -> bool:

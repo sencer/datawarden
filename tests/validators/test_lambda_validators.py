@@ -122,7 +122,7 @@ class TestRowsValidator:
     """Test Rows raises TypeError for non-DataFrame."""
     validator = Rows(lambda row: row.sum() < 100)
     with pytest.raises(TypeError, match="requires a pandas DataFrame"):
-      validator.validate(pd.Series([1, 2, 3]))  # type: ignore[arg-type]
+      validator.validate(pd.Series([1, 2, 3]))
 
   def test_with_decorator(self):
     """Test Rows validator with @validate decorator."""

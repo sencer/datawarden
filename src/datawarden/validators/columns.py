@@ -48,7 +48,7 @@ class HasColumns(Validator[pd.DataFrame]):
     super().__init__()
     self.columns = columns
 
-    instantiated: list[Validator[Any]] = []  # pyright: ignore[reportExplicitAny]
+    instantiated: list[Validator[Any]] = []
     for v_item in validators:
       v = instantiate_validator(v_item)
       if v:
@@ -75,9 +75,9 @@ class HasColumns(Validator[pd.DataFrame]):
 
     if final_validators:
       for col in self.columns:
-        column_data = data[col]  # type: ignore[union-attr]
+        column_data = data[col]
         for v in final_validators:
-          v.validate(column_data)  # type: ignore[assignment]
+          v.validate(column_data)
 
 
 class HasColumn(Validator[pd.DataFrame]):
@@ -90,14 +90,13 @@ class HasColumn(Validator[pd.DataFrame]):
   def __init__(
     self,
     column: str,
-    *validators: Validator[Any]  # type: ignore[misc]
-    | type[Validator[Any]],  # type: ignore[misc]
+    *validators: Validator[Any] | type[Validator[Any]],
   ) -> None:
     super().__init__()
     self.column = column
 
     # Instantiate validators at construction time (unify with HasColumns)
-    instantiated: list[Validator[Any]] = []  # pyright: ignore[reportExplicitAny]
+    instantiated: list[Validator[Any]] = []
     for v_item in validators:
       v = instantiate_validator(v_item)
       if v:

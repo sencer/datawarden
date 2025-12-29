@@ -47,7 +47,7 @@ def reset_config() -> None:
 
 
 @contextlib.contextmanager
-def overrides(**kwargs: Any) -> Iterator[None]:  # noqa: ANN401
+def overrides(**kwargs: Any) -> Iterator[None]:
   """Context manager to temporarily override configuration.
 
   Useful for:

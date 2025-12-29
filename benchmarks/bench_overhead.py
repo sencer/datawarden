@@ -4,7 +4,7 @@ import timeit
 import numpy as np
 import pandas as pd
 
-from datawarden import Finite, Validated, validate  # noqa: TC001
+from datawarden import Finite, Validated, validate
 
 # Setup data
 data = pd.Series(np.random.randn(1000))

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import override
+from typing import Any, cast, override
 
 import numpy as np
 import pandas as pd
@@ -21,7 +21,7 @@ def _get_datetime_array(
   if isinstance(data, pd.DatetimeIndex):
     return np.asarray(data.view(np.int64))
   if isinstance(data, pd.Series) and pd.api.types.is_datetime64_any_dtype(data.dtype):
-    return np.asarray(data.values.view(np.int64))  # type: ignore[union-attr]
+    return np.asarray(data.values.view(np.int64))
   return None
 
 
@@ -48,7 +48,8 @@ class NoTimeGaps(Validator[pd.Series | pd.Index]):
     super().__init__()
     self.freq = freq
     # Pre-compute expected nanoseconds for performance
-    self._expected_ns: int = pd.Timedelta(pd.tseries.frequencies.to_offset(freq)).value  # type: ignore[arg-type]
+    offset = pd.tseries.frequencies.to_offset(freq)
+    self._expected_ns: int = int(pd.Timedelta(cast("Any", offset)).value)
     self._last_val: int | None = None
 
   @override
@@ -115,9 +116,8 @@ class MaxGap(Validator[pd.Series | pd.Index]):
     super().__init__()
     self.max_gap = max_gap
     # Pre-compute max gap nanoseconds for performance
-    self._max_gap_ns: int = pd.Timedelta(
-      pd.tseries.frequencies.to_offset(max_gap)
-    ).value  # type: ignore[arg-type]
+    offset = pd.tseries.frequencies.to_offset(max_gap)
+    self._max_gap_ns: int = int(pd.Timedelta(cast("Any", offset)).value)
     self._last_val: int | None = None
 
   @override
@@ -144,7 +144,7 @@ class MaxGap(Validator[pd.Series | pd.Index]):
     if self._last_val is not None:
       actual_gap = int(dt_array[0]) - self._last_val
       if actual_gap > self._max_gap_ns:
-        max_found = pd.Timedelta(nanoseconds=int(actual_gap))
+        max_found = pd.Timedelta(int(actual_gap), unit="ns")
         raise ValueError(
           f"Time gap exceeds maximum '{self.max_gap}' (found gap of {max_found})"
         )
@@ -154,7 +154,7 @@ class MaxGap(Validator[pd.Series | pd.Index]):
       actual_diffs_ns = np.diff(dt_array)
 
       if np.any(actual_diffs_ns > self._max_gap_ns):
-        max_found = pd.Timedelta(nanoseconds=int(np.max(actual_diffs_ns)))
+        max_found = pd.Timedelta(int(np.max(actual_diffs_ns)), unit="ns")
         raise ValueError(
           f"Time gap exceeds maximum '{self.max_gap}' (found gap of {max_found})"
         )
@@ -240,7 +240,7 @@ class MaxDiff(Validator[pd.Series]):
 
     if len(working_data) > 1:
       # Use absolute difference for numeric data
-      diffs = np.abs(np.diff(working_data.values))  # type: ignore[arg-type]
+      diffs = np.abs(np.diff(cast("Any", working_data.values)))
 
       if np.any(diffs > self.max_diff):
         max_found = float(np.max(diffs))

@@ -226,7 +226,7 @@ class TestMaxDiff:
     df = pd.DataFrame({"a": [1, 2, 3]})
     validator = MaxDiff(5)
     with pytest.raises(TypeError, match="MaxDiff requires a pandas Series"):
-      validator.validate(df)  # type: ignore[arg-type]
+      validator.validate(df)
 
   def test_maxdiff_requires_numeric(self):
     """Test MaxDiff requires numeric data."""
