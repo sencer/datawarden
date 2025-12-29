@@ -47,7 +47,10 @@ class Unique(Validator[pd.Series | pd.Index]):
   Can be applied directly to pd.Index or pd.Series values.
   """
 
-  is_chunkable = False
+  @property
+  @override
+  def is_chunkable(self) -> bool:
+    return False
 
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
@@ -67,8 +70,6 @@ class MonoUp(Validator[pd.Series | pd.Index]):
   Use with Index(MonoUp) to apply to Series/DataFrame index.
   Can be applied directly to pd.Index or pd.Series values.
   """
-
-  is_chunkable = True
 
   def __init__(self) -> None:
     super().__init__()
@@ -112,8 +113,6 @@ class MonoDown(Validator[pd.Series | pd.Index]):
   Use with Index(MonoDown) to apply to Series/DataFrame index.
   Can be applied directly to pd.Index or pd.Series values.
   """
-
-  is_chunkable = True
 
   def __init__(self) -> None:
     super().__init__()
@@ -171,8 +170,12 @@ class Index(Validator[pd.Series | pd.DataFrame | pd.Index]):
       if v:
         instantiated.append(v)
     self.validators = tuple(instantiated)
-    # Only chunkable if ALL inner validators are chunkable
-    self.is_chunkable = all(getattr(v, "is_chunkable", True) for v in self.validators)
+
+  @property
+  @override
+  def is_chunkable(self) -> bool:
+    """Only chunkable if ALL inner validators are chunkable."""
+    return all(getattr(v, "is_chunkable", True) for v in self.validators)
 
   @override
   def reset(self) -> None:

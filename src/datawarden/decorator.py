@@ -9,10 +9,8 @@ import inspect
 import typing
 from typing import (
   TYPE_CHECKING,
-  Annotated,
   Any,
   ParamSpec,
-  get_args,
   get_origin,
   overload,
 )
@@ -20,15 +18,9 @@ from typing import (
 from loguru import logger
 import pandas as pd
 
-from datawarden.base import Validator
 from datawarden.config import get_config
-from datawarden.exceptions import LogicError
-from datawarden.protocols import MetaValidator
-from datawarden.solver import resolve_domains
-from datawarden.utils import get_chunks, instantiate_validator, is_pandas_type
-from datawarden.validators.columns import HasColumn, HasColumns
-from datawarden.validators.comparison import Ge, Gt, Le, Lt
-from datawarden.validators.value import IgnoringNaNs, Rows, Shape
+from datawarden.plan import ValidationPlanBuilder
+from datawarden.utils import get_chunks
 
 _shared_executor: concurrent.futures.ThreadPoolExecutor | None = None
 
@@ -103,153 +95,15 @@ def validate[**P, R](
     The decorated function with automatic validation support.
   """
 
-  def decorator(  # noqa: PLR0914
+  def decorator(
     func: Callable[P, R],
   ) -> Callable[P, R | None]:
     # Inspect function signature
     sig = inspect.signature(func)
-    type_hints = typing.get_type_hints(func, include_extras=True)
 
-    # Pre-compute validators and base types for each argument
-    arg_validators: dict[str, Any] = {}
-    arg_base_types: dict[str, type] = {}
-
-    for param_name in sig.parameters:
-      name = str(param_name)
-      if name in type_hints:
-        hint = type_hints[name]
-
-        # Handle Optional/Union types
-        origin = get_origin(hint)
-        if (
-          origin is typing.Union
-          or str(origin) == "typing.Union"
-          or str(origin) == "<class 'types.UnionType'>"
-        ):
-          # Check args for Annotated
-          for arg in get_args(hint):
-            if get_origin(arg) is Annotated:
-              hint = arg
-              break
-
-        if get_origin(hint) is Annotated:
-          args = get_args(hint)
-          # First arg is the type, rest are metadata (validators)
-          raw_validators = []
-          for item in args[1:]:
-            v = instantiate_validator(item)
-            if v:
-              raw_validators.append(v)
-
-          # 1. Handle Markers (e.g. IgnoringNaNs())
-          # Must be done BEFORE meta-validator expansion to allow markers to wrap other validators,
-          # which might then need expansion themselves (e.g. IgnoringNaNs(HasColumn)).
-          has_ignoring_nans_marker = any(
-            isinstance(v, IgnoringNaNs) and v.is_marker() for v in raw_validators
-          )
-          if has_ignoring_nans_marker:
-            wrapped_validators = []
-            for v in raw_validators:
-              if isinstance(v, IgnoringNaNs) and v.is_marker():
-                continue  # Skip the marker itself
-              if isinstance(v, IgnoringNaNs):
-                # Already wrapped, keep as-is
-                wrapped_validators.append(v)
-              else:
-                # Wrap with IgnoringNaNs
-                wrapped_validators.append(IgnoringNaNs(v, _check_syntax=False))
-            raw_validators = wrapped_validators
-
-          # 2. Expand MetaValidators
-          # MetaValidators (like IgnoringNaNs) can transform themselves into other validators.
-          # e.g., IgnoringNaNs(HasColumn(...)) -> HasColumn(..., IgnoringNaNs(...))
-          # This must run AFTER marker logic to handle implicit wrapping correctly.
-          optimized_validators = []
-          for v in raw_validators:
-            if isinstance(v, MetaValidator):
-              optimized_validators.extend(v.transform())
-            else:
-              optimized_validators.append(v)
-          raw_validators = optimized_validators
-
-          annotated_type = args[0]
-          is_pandas = is_pandas_type(annotated_type)
-
-          # Filter and Process Validators
-          if is_pandas:
-            # Separate into Holistic, Column-Specific, and Global
-            holistic = []
-            globals_list = []
-            col_map: dict[str, list[Validator[Any]]] = {}
-
-            for v in raw_validators:
-              if isinstance(v, (HasColumn, HasColumns)):
-                cols = v.columns if isinstance(v, HasColumns) else [v.column]
-
-                # Instantiate internal validators
-                specs = []
-                for item in v.validators:
-                  inst = instantiate_validator(item, _check_syntax=False)
-                  if inst:
-                    specs.append(inst)
-
-                for col in cols:
-                  if str(col) not in col_map:
-                    col_map[str(col)] = []
-                  col_map[str(col)].extend(specs)
-
-              elif isinstance(v, (Shape, Rows)) or (
-                isinstance(v, (Ge, Le, Gt, Lt)) and len(v.targets) > 1
-              ):
-                holistic.append(v)
-              else:
-                globals_list.append(v)
-
-            # Resolve Globals
-            resolved_globals = list(globals_list)
-            try:
-              # Check for global contradictions (pass empty locals)
-              resolved_globals = resolve_domains(resolved_globals, [])
-            except Exception as e:
-              if isinstance(e, LogicError):
-                raise
-              raise ValueError(
-                f"Global validation conflict in parameter '{name}': {e}"
-              ) from e
-
-            # Resolve Columns
-            resolved_columns = {}
-            for col, local_specs in col_map.items():
-              # Resolve: globals apply unless they conflict with local specs
-              try:
-                resolved = resolve_domains(resolved_globals, local_specs)
-                resolved_columns[col] = resolved
-              except Exception as e:
-                if isinstance(e, LogicError):
-                  raise
-                raise ValueError(
-                  f"Validation conflict for column '{col}' in parameter '{name}': {e}"
-                ) from e
-
-            # Prepare Plan
-            plan = {
-              "holistic": holistic,
-              "columns": resolved_columns,
-              "default": resolved_globals,  # For columns not in col_map
-              "has_col_checks": bool(
-                col_map
-              ),  # To know if we need to check column existence based on keys
-            }
-            arg_validators[name] = plan
-
-          else:
-            # Non-pandas types
-            validators = [v for v in raw_validators if isinstance(v, Validator)]
-            if validators:
-              arg_validators[name] = validators
-
-          # Store the base type for runtime type checking
-          arg_base_types[name] = annotated_type
+    # Build validation plan
+    builder = ValidationPlanBuilder(func)
+    arg_validators, arg_base_types = builder.build()
 
     def validate_arg(  # noqa: PLR0911
       arg_name: str,
