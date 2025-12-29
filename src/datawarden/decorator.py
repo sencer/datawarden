@@ -78,10 +78,10 @@ def validate[**P, R](
   Validation features:
   - **Type Checking:** Runtime checks against Annotated base types.
   - **Constraint Validation:** Applies all validators in the Annotated metadata.
-  - **Memory Efficiency:** Supports chunked validation for large datasets via
-    `config.chunk_size_rows`.
-  - **Parallelism:** Validates multiple large arguments in parallel threads
-    (unless chunking is active).
+  - **Memory Efficiency:** Supports chunked validation for large datasets (DataFrame,
+    Series, Index) via `config.chunk_size_rows`.
+  - **Parallelism:** Validates multiple large arguments (DataFrame, Series, Index)
+    in parallel threads (unless chunking is active).
 
   Args:
     func: The function to decorate.
@@ -197,8 +197,8 @@ def validate[**P, R](
                     return False
                   raise type(e)(msg) from e
 
-          elif isinstance(value, pd.Series):
-            # Series uses 'default' validators (Globals) + Holistic (already ran)
+          elif isinstance(value, (pd.Series, pd.Index)):
+            # Series/Index uses 'default' validators (Globals) + Holistic (already ran)
             for v in plan["default"]:
               is_chunkable = getattr(v, "is_chunkable", True)
               if mode == "chunkable" and not is_chunkable:

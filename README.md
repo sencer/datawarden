@@ -211,7 +211,9 @@ def process_budget(
 
 - **`NoTimeGaps`** - Ensures no gaps in datetime values/index
 - **`MaxGap(timedelta)`** - Ensures maximum gap between datetime values
-- **`MaxDiff(value)`** - Ensures maximum difference between consecutive values
+- **`MaxDiff(value)`** - Ensures maximum difference between consecutive values.
+  By default, rejects NaNs. When used with `IgnoringNaNs`, it validates jumps
+  between the remaining values after dropping NaNs.
 
 ## Examples
 
