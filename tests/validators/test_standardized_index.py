@@ -11,8 +11,10 @@ from datawarden import (
   Index,
   Le,
   Lt,
+  Negative,
   NonNaN,
   NonNegative,
+  NonPositive,
   Positive,
   Shape,
   StrictFinite,
@@ -41,12 +43,12 @@ class TestStandardizedIndexValidation:
 
     # Check invalid input (Inf)
     idx_inf = pd.Index([1.0, np.inf, 3.0])
-    with pytest.raises(ValueError, match="contains Inf"):
+    with pytest.raises(ValueError, match="contains NaN or Inf"):
       StrictFinite().validate(idx_inf)
 
     # Check invalid input (NaN)
     idx_nan = pd.Index([1.0, np.nan, 3.0])
-    with pytest.raises(ValueError, match="contains NaN"):
+    with pytest.raises(ValueError, match="contains NaN or Inf"):
       StrictFinite().validate(idx_nan)
 
   def test_index_wrapper_with_finite(self):
@@ -129,3 +131,27 @@ class TestStandardizedIndexValidation:
     idx_zero = pd.Index([0, 1, 2])
     with pytest.raises(ValueError, match="must be positive"):
       Positive().validate(idx_zero)
+
+  def test_negative_on_index(self):
+    """Test Negative validator works on pd.Index."""
+
+    # Valid
+    idx = pd.Index([-1, -2, -3])
+    assert Negative().validate(idx) is None
+
+    # Check invalid input (>= 0)
+    idx_pos = pd.Index([-1, 0, -2])
+    with pytest.raises(ValueError, match="must be negative"):
+      Negative().validate(idx_pos)
+
+  def test_non_positive_on_index(self):
+    """Test NonPositive validator works on pd.Index."""
+
+    # Valid
+    idx = pd.Index([0, -1, -2])
+    assert NonPositive().validate(idx) is None
+
+    # Check invalid input (> 0)
+    idx_pos = pd.Index([-1, 1, -2])
+    with pytest.raises(ValueError, match="must be non-positive"):
+      NonPositive().validate(idx_pos)

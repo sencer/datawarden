@@ -17,6 +17,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+pyarrow = [
+    "pyarrow>=14.0.0",
+]
 dev = [
     "basedpyright>=1.31.7",
     "ruff>=0.1.0",
@@ -24,6 +27,7 @@ dev = [
     "pytest-cov>=4.0.0",
     "build>=0.10.0", # Added for package building
     "twine>=4.0.0", # Added for package distribution checking and uploading
+    "pyarrow>=14.0.0", # For testing PyArrow-backed dtypes
 ]
 
 [tool.setuptools.packages.find]

@@ -61,16 +61,12 @@ class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     # Check for NaN values before comparison
-    if not self.ignore_nan:
-      mask_nan = pd.isna(data.values)
-      if (
-        isinstance(data, (pd.Series, pd.DataFrame, pd.Index)) and mask_nan.any()  # pyright: ignore
-      ):
-        report_failures(
-          data,
-          mask_nan,  # pyright: ignore
-          f"Cannot perform {self.op_symbol} comparison with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
-        )
+    if not self.ignore_nan and np.any(mask_nan := pd.isna(data.values)):  # pyright: ignore
+      report_failures(
+        data,
+        mask_nan,  # pyright: ignore
+        f"Cannot perform {self.op_symbol} comparison with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
+      )
 
     if len(self.targets) == 1:
       # Unary comparison: data op target

@@ -1,15 +1,10 @@
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportCallIssue=false, reportArgumentType=false
 import timeit
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 
-if TYPE_CHECKING:
-  from datawarden import Finite, Validated
-
-from datawarden import validate
+from datawarden import Finite, Validated, validate  # noqa: TC001
 
 # Setup data
 data = pd.Series(np.random.randn(1000))
