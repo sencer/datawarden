@@ -558,6 +558,10 @@ class Rows(Validator[pd.DataFrame]):
 class OneOf(Validator[pd.Series | pd.Index]):
   """Validator for categorical values - ensures all values are in allowed set.
 
+  Performance Note:
+    Uses vectorized `isin()` operations for Series validation, making it
+    extremely efficient for large datasets compared to manual set iteration.
+
   Example:
   - OneOf("a", "b", "c")
 
