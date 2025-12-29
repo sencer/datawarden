@@ -111,6 +111,28 @@ result = process(data)  # Works! NaNs are ignored
 
 Works with: `Ge`, `Le`, `Gt`, `Lt`, `Positive`, `NonNegative`, `Finite`, and any value validator.
 
+### Constraint Relaxation (Local Overrides)
+
+Sometimes you want a global constraint (like `NonNaN` or `StrictFinite`) but need to allow exceptions for specific columns. Use `AllowNaN` or `AllowInf` to override global constraints locally.
+
+```python
+from datawarden import validate, Validated, NonNaN, HasColumn, AllowNaN
+import pandas as pd
+
+@validate
+def process_data(
+    # Global NonNaN applies to all columns by default
+    df: Validated[pd.DataFrame, NonNaN, HasColumn("optional_col", AllowNaN)],
+) -> pd.DataFrame:
+    """Process data where 'optional_col' is allowed to have NaNs."""
+    return df
+
+df = pd.DataFrame({
+    "required": [1.0, 2.0],        # Must not have NaNs (Global NonNaN)
+    "optional_col": [1.0, float("nan")] # NaNs allowed here (Local AllowNaN)
+})
+process_data(df) # Passes!
+```
 
 ### Shape Validators
 
@@ -505,6 +527,48 @@ For maximum performance in production critical paths, you can disable validation
 ### Cached Validator Compilation
 
 Validation logic is pre-compiled at import time (when the decorator runs). The runtime overhead is minimal, consisting only of the necessary numpy/pandas checks.
+
+## Configuration & Memory Efficiency
+
+### Config Overrides
+
+You can temporarily change global configuration settings using the `config.overrides()` context manager. This is useful for testing or specific processing blocks.
+
+```python
+from datawarden.config import overrides
+from datawarden import validate, Validated, Finite
+
+@validate
+def heavy_process(data: Validated[pd.DataFrame, Finite]):
+    ...
+
+# Skip validation for this block
+with overrides(skip_validation=True):
+    heavy_process(large_df)
+
+# Or change warn_only mode
+with overrides(warn_only=True):
+    heavy_process(dirty_data)
+```
+
+### Memory-Efficient Chunking
+
+For very large DataFrames that fit in memory but whose validation might spike memory usage (e.g., creating large boolean masks), you can enable **Chunked Validation**.
+
+When `chunk_size_rows` is set, `datawarden` splits the DataFrame/Series into smaller chunks and validates them sequentially.
+
+```python
+# Process in chunks of 100,000 rows
+with overrides(chunk_size_rows=100_000):
+    heavy_process(huge_df)
+```
+
+**Supported Validators:**
+- **Stateless Validators:** `Ge`, `Le`, `NonNaN`, `Finite`, `Is`, `Rows`, etc. (Validated per chunk independently).
+- **Stateful Validators:** `MonoUp`, `MonoDown`, `NoTimeGaps`, `MaxGap`, `MaxDiff`. (State is preserved across chunks to ensure global correctness).
+- **Index Validators:** `Index(MonoUp)`, etc.
+
+*Note: Global property validators like `Unique` or `Shape` (exact rows) are **NOT** chunkable and will still require the full dataset to be validated at once. The library automatically handles this distinction.*
 
 ## Type Checking
 

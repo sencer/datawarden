@@ -81,9 +81,9 @@ def test_additive_checks():
   # A checks Finite AND Positive.
   # B checks Finite.
 
-  # A = -1 (Finite, Not Positive) -> Fail Positive
-  df_fail_a = pd.DataFrame({"A": [-1], "B": [0]})
-  with pytest.raises(ValueError, match="positive"):
+  # Invalid A
+  df_fail_a = pd.DataFrame({"A": [-1.0, 2.0], "B": [1.0, -1.0]})
+  with pytest.raises(ValueError, match=r"(positive|Data must be > 0)"):
     process(df_fail_a)
 
   # B = Inf (Not Finite) -> Fail Finite

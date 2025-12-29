@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 
 from datawarden import Finite, Validated, validate
-from datawarden.config import get_config, reset_config
+from datawarden.config import get_config, overrides, reset_config
 
 
 class TestGlobalConfig:
@@ -36,7 +36,7 @@ class TestGlobalConfig:
       return True
 
     # Should raise because we forced validation locally
-    with pytest.raises(ValueError, match="Finite"):
+    with pytest.raises(ValueError, match=r"(Finite|IgnoringNaNs)"):
       process(pd.Series([float("inf")]))
 
   def test_global_warn_only(self):
@@ -58,9 +58,10 @@ class TestGlobalConfig:
     def process(_data: Validated[pd.Series, Finite]):
       return True
 
-    # Should raise because we forced strict validation locally
-    with pytest.raises(ValueError, match="Finite"):
-      process(pd.Series([float("inf")]))
+    # 1. Global warn=True, Explicit warn=False (should raise)
+    get_config().warn_only = True
+    with pytest.raises(ValueError, match=r"(Finite|IgnoringNaNs)"):
+      process(pd.Series([float("inf")]), warn_only=False)
 
   def test_kwargs_override_global(self):
     """Test that function call kwargs override global config."""
@@ -70,6 +71,29 @@ class TestGlobalConfig:
     def process(_data: Validated[pd.Series, Finite]):
       return True
 
-    # Global is skip=True, but we pass skip_validation=False
-    with pytest.raises(ValueError, match="Finite"):
+    # Should raise ValueError because we force validation
+    with pytest.raises(ValueError, match=r"(Finite|IgnoringNaNs)"):
       process(pd.Series([float("inf")]), skip_validation=False)
+
+  def test_config_overrides(self):
+    """Test that config.overrides() context manager works."""
+    assert get_config().skip_validation is False
+
+    with overrides(skip_validation=True):
+      assert get_config().skip_validation is True
+
+      @validate
+      def process(_data: Validated[pd.Series, Finite]):
+        return True
+
+      # Should not raise
+      assert process(pd.Series([float("inf")])) is True
+
+    # Should reset after context
+    assert get_config().skip_validation is False
+
+    with (
+      pytest.raises(AttributeError, match="Config has no attribute 'non_existent'"),
+      overrides(non_existent=True),
+    ):
+      pass

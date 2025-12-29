@@ -1,6 +1,9 @@
 """Protocols from datawarden."""
 
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+  from datawarden.base import Validator
 
 
 @runtime_checkable
@@ -13,4 +16,21 @@ class ScalarConstraint(Protocol):
 
   def describe(self) -> str:
     """Return a string description of the constraint (e.g. '>= 10')."""
+    ...
+
+
+@runtime_checkable
+class MetaValidator(Protocol):
+  """Protocol for validators that transform other validators.
+
+  Meta-validators are resolved before standard validation logic.
+  They can modify, unwrap, or replace validators in the chain.
+  """
+
+  def transform(self) -> list["Validator[Any]"]:  # pyright: ignore[reportExplicitAny]
+    """Transform this validator into one or more concrete validators.
+
+    Returns:
+      A list of validators to replace this one in the chain.
+    """
     ...

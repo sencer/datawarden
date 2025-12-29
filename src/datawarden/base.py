@@ -11,6 +11,18 @@ Validated = Annotated
 class Validator[T]:
   """Base class for validators."""
 
+  # Whether this validator can be safely applied to data chunks independently.
+  # Set to False for validators that check global properties (e.g. Unique, Shape).
+  is_chunkable: bool = True
+
+  def reset(self) -> None:
+    """Reset validator state for new validation run.
+
+    This is called before starting a validation run, especially important
+    for stateful chunked validation.
+    """
+    pass
+
   def validate(self, data: T) -> None:
     """Validate the data and raise an exception if invalid.
 

@@ -11,8 +11,9 @@ import numpy as np
 import pandas as pd
 
 from datawarden.base import Validator
-from datawarden.protocols import ScalarConstraint
-from datawarden.utils import instantiate_validator
+from datawarden.protocols import MetaValidator, ScalarConstraint
+from datawarden.utils import instantiate_validator, report_failures
+from datawarden.validators.columns import HasColumn, HasColumns
 
 # Type alias for pandas types
 PandasData = pd.Series | pd.DataFrame | pd.Index
@@ -27,7 +28,7 @@ def _require_pandas(data: object, validator_name: str) -> PandasData:
   return data
 
 
-class IgnoringNaNs(Validator[pd.Series | pd.DataFrame | pd.Index]):
+class IgnoringNaNs(Validator[pd.Series | pd.DataFrame | pd.Index], MetaValidator):
   """Wrapper validator that ignores NaN values during validation.
 
   Use this to apply validators only to non-NaN values, allowing NaN to pass through.
@@ -68,6 +69,32 @@ class IgnoringNaNs(Validator[pd.Series | pd.DataFrame | pd.Index]):
     """Check if this is a marker (no wrapped validator)."""
     return self.wrapped is None
 
+  def transform(self) -> list[Validator[Any]]:  # pyright: ignore[reportExplicitAny]
+    """Unwrap nested HasColumn/HasColumns validators.
+
+    If this validator wraps a HasColumn/HasColumns, we need to push the
+    IgnoringNaNs logic *inside* the column validator so it applies to the
+    column's data, not the DataFrame itself.
+    """
+    if hasattr(self.wrapped, "with_ignore_nan"):
+      return [self.wrapped.with_ignore_nan()]  # type: ignore
+
+    if isinstance(self.wrapped, (HasColumn, HasColumns)):
+      inner = self.wrapped
+      new_validators: list[Validator[Any]] = []  # pyright: ignore[reportExplicitAny]
+
+      for sub in inner.validators:
+        if isinstance(sub, IgnoringNaNs):
+          new_validators.append(sub)
+        else:
+          new_validators.append(IgnoringNaNs(sub, _check_syntax=False))
+
+      if isinstance(inner, HasColumn):
+        return [HasColumn(inner.column, *new_validators)]
+      return [HasColumns(inner.columns, *new_validators)]
+
+    return [self]
+
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     """Validate only non-NaN values."""
@@ -101,6 +128,38 @@ class IgnoringNaNs(Validator[pd.Series | pd.DataFrame | pd.Index]):
         self.wrapped.validate(filtered)
 
 
+class AllowNaN(Validator[pd.Series | pd.DataFrame | pd.Index]):
+  """Marker validator to explicitly allow NaN values.
+
+  Used to override a global NonNaN constraint locally.
+
+  Example:
+    @validate
+    def process(df: Validated[pd.DataFrame, NonNaN, HasColumn("optional", AllowNaN)]):
+        ...
+  """
+
+  @override
+  def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
+    pass
+
+
+class AllowInf(Validator[pd.Series | pd.DataFrame | pd.Index]):
+  """Marker validator to explicitly allow Infinite values.
+
+  Used to override a global Finite/StrictFinite constraint locally.
+
+  Example:
+    @validate
+    def process(df: Validated[pd.DataFrame, Finite, HasColumn("slope", AllowInf)]):
+        ...
+  """
+
+  @override
+  def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
+    pass
+
+
 class Finite(Validator[pd.Series | pd.DataFrame | pd.Index]):
   """Validator for non-infinite values.
 
@@ -124,9 +183,10 @@ class Finite(Validator[pd.Series | pd.DataFrame | pd.Index]):
     if (
       (isinstance(data, pd.DataFrame) or pd.api.types.is_numeric_dtype(data))
       and len(numeric_data) > 0  # type: ignore[arg-type]
-      and np.any(np.isinf(numeric_data.values))  # type: ignore[arg-type]
     ):
-      raise ValueError("Data must be finite (contains Inf)")
+      mask = np.isinf(numeric_data)  # pyright: ignore[reportArgumentType]
+      if mask.any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
+        report_failures(numeric_data, mask, "Data must be finite (contains Inf)")
 
 
 class StrictFinite(Validator[pd.Series | pd.DataFrame | pd.Index]):
@@ -141,9 +201,10 @@ class StrictFinite(Validator[pd.Series | pd.DataFrame | pd.Index]):
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     _require_pandas(data, "StrictFinite")
-    # Check for NaN (axis=None returns scalar bool, pandas-stubs typing issue)
-    if data.isna().any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
-      raise ValueError("Data must be finite (contains NaN)")
+    # Check for NaN
+    mask_nan = data.isna()
+    if mask_nan.any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
+      report_failures(data, mask_nan, "Data must be finite (contains NaN)")
 
     # Check for infinite values (only for numeric data)
     numeric_data = (
@@ -154,9 +215,10 @@ class StrictFinite(Validator[pd.Series | pd.DataFrame | pd.Index]):
     if (
       (isinstance(data, pd.DataFrame) or pd.api.types.is_numeric_dtype(data))
       and len(numeric_data) > 0  # type: ignore[arg-type]
-      and np.any(np.isinf(numeric_data.values))  # type: ignore[arg-type]
     ):
-      raise ValueError("Data must be finite (contains Inf)")
+      mask_inf = np.isinf(numeric_data)  # pyright: ignore[reportArgumentType]
+      if mask_inf.any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
+        report_failures(numeric_data, mask_inf, "Data must be finite (contains Inf)")
 
 
 class NonEmpty(Validator[pd.Series | pd.DataFrame | pd.Index]):
@@ -178,9 +240,9 @@ class NonNaN(Validator[pd.Series | pd.DataFrame | pd.Index]):
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     _require_pandas(data, "NonNaN")
-    # axis=None returns scalar bool, pandas-stubs typing issue
-    if data.isna().any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
-      raise ValueError("Data must not contain NaN values")
+    mask = data.isna()
+    if mask.any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
+      report_failures(data, mask, "Data must not contain NaN values")
 
 
 class NonNegative(Validator[pd.Series | pd.DataFrame | pd.Index]):
@@ -189,16 +251,25 @@ class NonNegative(Validator[pd.Series | pd.DataFrame | pd.Index]):
   Rejects NaN values by default. Use IgnoringNaNs(NonNegative()) to allow NaN.
   """
 
+  def __init__(self, ignore_nan: bool = False) -> None:
+    super().__init__()
+    self.ignore_nan = ignore_nan
+
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     _require_pandas(data, "NonNegative")
     # Check for NaN values first (consistent with comparison validators)
-    if pd.isna(data.values).any():
-      raise ValueError(
-        "Cannot validate non-negative with NaN values (use IgnoringNaNs wrapper to skip NaN values)"
-      )
-    if np.any(data.values < 0):  # pyright: ignore[reportOperatorIssue,reportUnknownArgumentType]
-      raise ValueError("Data must be non-negative")
+    if not self.ignore_nan:
+      mask_nan = data.isna()
+      if mask_nan.any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
+        report_failures(
+          data,
+          mask_nan,
+          "Cannot validate non-negative with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
+        )
+    mask = data < 0  # pyright: ignore[reportOperatorIssue]
+    if mask.any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
+      report_failures(data, mask, "Data must be non-negative")
 
 
 class Positive(Validator[pd.Series | pd.DataFrame | pd.Index]):
@@ -207,16 +278,25 @@ class Positive(Validator[pd.Series | pd.DataFrame | pd.Index]):
   Rejects NaN values by default. Use IgnoringNaNs(Positive()) to allow NaN.
   """
 
+  def __init__(self, ignore_nan: bool = False) -> None:
+    super().__init__()
+    self.ignore_nan = ignore_nan
+
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     _require_pandas(data, "Positive")
     # Check for NaN values first (consistent with comparison validators)
-    if pd.isna(data.values).any():
-      raise ValueError(
-        "Cannot validate positive with NaN values (use IgnoringNaNs wrapper to skip NaN values)"
-      )
-    if np.any(data.values <= 0):  # pyright: ignore[reportOperatorIssue,reportUnknownArgumentType]
-      raise ValueError("Data must be positive")
+    if not self.ignore_nan:
+      mask_nan = data.isna()
+      if mask_nan.any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
+        report_failures(
+          data,
+          mask_nan,
+          "Cannot validate positive with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
+        )
+    mask = data <= 0  # pyright: ignore[reportOperatorIssue]
+    if mask.any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
+      report_failures(data, mask, "Data must be positive")
 
 
 class Between(Validator[pd.Series | pd.DataFrame | pd.Index]):
@@ -243,38 +323,54 @@ class Between(Validator[pd.Series | pd.DataFrame | pd.Index]):
     lower: float | int,
     upper: float | int,
     inclusive: tuple[bool, bool] = (True, True),
+    ignore_nan: bool = False,
   ) -> None:
     super().__init__()
     self.lower = lower
     self.upper = upper
     self.lower_inclusive, self.upper_inclusive = inclusive
+    self.ignore_nan = ignore_nan
 
   @override
   def __repr__(self) -> str:
-    if self.lower_inclusive and self.upper_inclusive:
-      return f"Between({self.lower!r}, {self.upper!r})"
-    return f"Between({self.lower!r}, {self.upper!r}, inclusive={self.lower_inclusive, self.upper_inclusive!r})"
+    args = [f"{self.lower!r}", f"{self.upper!r}"]
+    if not (self.lower_inclusive and self.upper_inclusive):
+      args.append(f"inclusive={self.lower_inclusive, self.upper_inclusive!r}")
+    if self.ignore_nan:
+      args.append("ignore_nan=True")
+    return f"Between({', '.join(args)})"
 
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     _require_pandas(data, "Between")
     # Check for NaN values first
-    if pd.isna(data.values).any():
-      raise ValueError(
-        "Cannot validate range with NaN values (use IgnoringNaNs wrapper to skip NaN values)"
-      )
+    if not self.ignore_nan:
+      mask_nan = data.isna()
+      if mask_nan.any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
+        report_failures(
+          data,
+          mask_nan,
+          "Cannot validate range with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
+        )
     # Check lower bound
     if self.lower_inclusive:
-      if np.any(data.values < self.lower):  # pyright: ignore[reportOperatorIssue,reportUnknownArgumentType]
-        raise ValueError(f"Data must be >= {self.lower}")
-    elif np.any(data.values <= self.lower):  # pyright: ignore[reportOperatorIssue,reportUnknownArgumentType]
-      raise ValueError(f"Data must be > {self.lower}")
+      mask = data < self.lower  # pyright: ignore[reportOperatorIssue]
+      if mask.any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
+        report_failures(data, mask, f"Data must be >= {self.lower}")
+    else:
+      mask = data <= self.lower  # pyright: ignore[reportOperatorIssue]
+      if mask.any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
+        report_failures(data, mask, f"Data must be > {self.lower}")
+
     # Check upper bound
     if self.upper_inclusive:
-      if np.any(data.values > self.upper):  # pyright: ignore[reportOperatorIssue,reportUnknownArgumentType]
-        raise ValueError(f"Data must be <= {self.upper}")
-    elif np.any(data.values >= self.upper):  # pyright: ignore[reportOperatorIssue,reportUnknownArgumentType]
-      raise ValueError(f"Data must be < {self.upper}")
+      mask = data > self.upper  # pyright: ignore[reportOperatorIssue]
+      if mask.any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
+        report_failures(data, mask, f"Data must be <= {self.upper}")
+    else:
+      mask = data >= self.upper  # pyright: ignore[reportOperatorIssue]
+      if mask.any(axis=None):  # pyright: ignore[reportArgumentType,reportGeneralTypeIssues]
+        report_failures(data, mask, f"Data must be < {self.upper}")
 
 
 # =============================================================================
@@ -511,6 +607,8 @@ class Shape(Validator[pd.Series | pd.DataFrame | pd.Index]):
 
   For Series, only the first dimension (rows) is checked.
   """
+
+  is_chunkable = False
 
   def __init__(
     self,

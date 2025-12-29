@@ -2,11 +2,37 @@
 
 from __future__ import annotations
 
-from typing import Any, get_origin
+from typing import TYPE_CHECKING, Any, get_origin
 
 import pandas as pd
 
 from datawarden.base import Validator
+
+if TYPE_CHECKING:
+  from collections.abc import Iterator
+
+  import numpy as np
+
+
+def get_chunks(
+  data: pd.Series | pd.DataFrame | pd.Index,
+  chunk_size: int,
+) -> Iterator[pd.Series | pd.DataFrame | pd.Index]:
+  """Yield chunks of data for memory-efficient processing.
+
+  Args:
+    data: The pandas object to chunk.
+    chunk_size: Number of rows per chunk.
+
+  Yields:
+    Slices of the original data.
+  """
+  n_rows = len(data)
+  for i in range(0, n_rows, chunk_size):
+    if isinstance(data, pd.Index):
+      yield data[i : i + chunk_size]
+    else:
+      yield data.iloc[i : i + chunk_size]
 
 
 def instantiate_validator(
@@ -86,3 +112,40 @@ def is_pandas_type(annotated_type: object) -> bool:
       return True
 
   return False
+
+
+def report_failures(
+  data: pd.Series | pd.DataFrame | pd.Index,
+  mask: pd.Series | pd.DataFrame | np.ndarray,  # pyright: ignore[reportExplicitAny]
+  msg: str,
+) -> None:
+  """Report validation failures with context."""
+  # Calculate number of failures
+  n_failed = mask.sum().sum() if isinstance(mask, pd.DataFrame) else mask.sum()
+
+  if n_failed == 0:
+    return
+
+  # Extract failing indices (limit to 5)
+  try:
+    if isinstance(data, (pd.Series, pd.Index)):
+      # For Index, we need to handle it carefully as it doesn't support boolean indexing same way always
+      if isinstance(data, pd.Index):
+        # Convert to Series to safely get index of failures
+        # If data IS the index, the "index" of failures is the values themselves?
+        # Or the integer position? Usually index validation implies checking index values.
+        failures = data[mask].tolist()[:5]  # pyright: ignore[reportArgumentType]
+      else:
+        # Series
+        failures = data[mask].index.tolist()[:5]  # pyright: ignore[reportAttributeAccessIssue]
+    # DataFrame
+    # Stack to get (index, column) pairs
+    elif isinstance(mask, pd.DataFrame):
+      failures = mask.stack()[mask.stack()].index.tolist()[:5]  # pyright: ignore
+    else:
+      failures = ["(unknown indices)"]
+  except Exception:  # noqa: BLE001
+    # Fallback if index extraction fails
+    failures = ["(error extracting indices)"]
+
+  raise ValueError(f"{msg} ({n_failed} violations. Examples: {failures})")

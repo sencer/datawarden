@@ -11,6 +11,7 @@ import pandas as pd
 if TYPE_CHECKING:
   from collections.abc import Callable
 from datawarden.base import Validator
+from datawarden.utils import report_failures
 
 
 class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
@@ -24,14 +25,22 @@ class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
   op_func: Callable[[float, float], bool]  # pyright: ignore[reportUninitializedInstanceVariable]
   opposite_op_func: Callable[[float, float], bool]  # pyright: ignore[reportUninitializedInstanceVariable]
 
-  def __init__(self, *targets: str | float | int | None) -> None:
+  def __init__(
+    self,
+    *targets: str | float | int | None,
+    ignore_nan: bool = False,
+  ) -> None:
     super().__init__()
     self.targets = targets
+    self.ignore_nan = ignore_nan
 
   @override
   def __repr__(self) -> str:
-    args = ", ".join(repr(t) for t in self.targets)
-    return f"{self.__class__.__name__}({args})"
+    args = [repr(t) for t in self.targets]
+    if self.ignore_nan:
+      args.append("ignore_nan=True")
+    args_str = ", ".join(args)
+    return f"{self.__class__.__name__}({args_str})"
 
   def check(self, value: int) -> bool:
     """Check constraint for a scalar integer (used by Shape validator)."""
@@ -45,24 +54,31 @@ class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
       return f"{self.op_symbol} {self.targets[0]}"
     return f"{self.__class__.__name__}({self.targets})"
 
+  def with_ignore_nan(self) -> _ComparisonValidator:
+    """Return a copy of this validator that ignores NaN values."""
+    return self.__class__(*self.targets, ignore_nan=True)
+
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     # Check for NaN values before comparison
-    if (
-      isinstance(data, (pd.Series, pd.DataFrame, pd.Index))
-      and pd.isna(data.values).any()
-    ):
-      raise ValueError(
-        f"Cannot perform {self.op_symbol} comparison with NaN values (use IgnoringNaNs wrapper to skip NaN values)"
-      )
+    if not self.ignore_nan:
+      mask_nan = pd.isna(data.values)
+      if (
+        isinstance(data, (pd.Series, pd.DataFrame, pd.Index)) and mask_nan.any()  # pyright: ignore
+      ):
+        report_failures(
+          data,
+          mask_nan,  # pyright: ignore
+          f"Cannot perform {self.op_symbol} comparison with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
+        )
 
     if len(self.targets) == 1:
       # Unary comparison: data op target
       target = self.targets[0]
-      if isinstance(data, (pd.Series, pd.DataFrame, pd.Index)) and np.any(
-        self.opposite_op_func(data.values, target)  # pyright: ignore[reportCallIssue,reportArgumentType]
-      ):
-        raise ValueError(f"Data must be {self.op_symbol} {target}")
+      if isinstance(data, (pd.Series, pd.DataFrame, pd.Index)):
+        mask = self.opposite_op_func(data.values, target)  # pyright: ignore[reportCallIssue,reportArgumentType]
+        if np.any(mask):
+          report_failures(data, mask, f"Data must be {self.op_symbol} {target}")  # pyright: ignore[reportArgumentType]
     else:
       # Column comparison: col1 op col2 op col3 ...
       if not isinstance(data, pd.DataFrame):
@@ -80,8 +96,11 @@ class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
         if missing:
           raise ValueError(f"Missing columns for comparison: {missing}")
 
-        if np.any(self.opposite_op_func(data[col1].values, data[col2].values)):  # pyright: ignore[reportCallIssue,reportArgumentType]
-          raise ValueError(f"{col1} must be {self.op_symbol} {col2}")
+        col1_vals = data[col1].values
+        col2_vals = data[col2].values
+        mask = self.opposite_op_func(col1_vals, col2_vals)  # pyright: ignore[reportCallIssue,reportArgumentType]
+        if np.any(mask):
+          report_failures(data, mask, f"{col1} must be {self.op_symbol} {col2}")  # pyright: ignore[reportArgumentType]
 
 
 class Ge(_ComparisonValidator):
