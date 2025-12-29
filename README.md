@@ -62,10 +62,13 @@ calculate_returns(bad_prices)
 ### Value Validators (Series/Index)
 
 - **`Finite`** - Ensures no Inf values (allows NaN)
-- **`StrictFinite`** - Ensures no Inf AND no NaN values
+- **`StrictFinite`** - Ensures no Inf AND no NaN values (uses atomic `np.isfinite()`)
 - **`NonNaN`** - Ensures no NaN values (allows Inf)
 - **`NonNegative`** - Ensures all values >= 0
 - **`Positive`** - Ensures all values > 0
+- **`Negative`** - Ensures all values < 0
+- **`NonPositive`** - Ensures all values <= 0
+- **`Between(lower, upper)`** - Ensures values in range [lower, upper]
 - **`NonEmpty`** - Ensures data is not empty
 - **`Unique`** - Ensures all values are unique
 - **`MonoUp`** - Ensures values are monotonically increasing
@@ -370,6 +373,41 @@ def track_drawdown(
     return (equity / equity.iloc[0]) - 1
 ```
 
+### Sign Validators (Positive/Negative)
+
+Complete set of sign validators for numerical constraints:
+
+```python
+from datawarden import validate, Validated, Positive, NonNegative, Negative, NonPositive
+import pandas as pd
+
+# Positive: values > 0
+@validate
+def calculate_log(data: Validated[pd.Series, Positive]) -> pd.Series:
+    """Log requires strictly positive values."""
+    import numpy as np
+    return np.log(data)
+
+# NonNegative: values >= 0 (zero allowed)
+@validate
+def calculate_sqrt(data: Validated[pd.Series, NonNegative]) -> pd.Series:
+    """Square root allows zero."""
+    import numpy as np
+    return np.sqrt(data)
+
+# Negative: values < 0
+@validate
+def process_losses(data: Validated[pd.Series, Negative]) -> pd.Series:
+    """Process losses (must be negative)."""
+    return data.abs()
+
+# NonPositive: values <= 0 (zero allowed)
+@validate
+def process_debits(data: Validated[pd.Series, NonPositive]) -> pd.Series:
+    """Process debits (must be zero or negative)."""
+    return data
+```
+
 ### Shape Validation
 
 ```python
@@ -408,6 +446,40 @@ def process_vector(
 ) -> pd.Series:
     """Process vector - must have exactly 100 elements."""
     return data
+```
+
+### Between Range Validation
+
+```python
+from datawarden import validate, Validated, Between
+import pandas as pd
+
+@validate
+def normalize_percentage(
+    data: Validated[pd.Series, Between(0, 100)],
+) -> pd.Series:
+    """Normalize percentage data to [0, 1] range."""
+    return data / 100
+
+# Valid data
+pct = pd.Series([0, 25, 50, 75, 100])
+result = normalize_percentage(pct)
+
+# Out of range raises error
+bad_pct = pd.Series([0, 50, 150])  # 150 > 100
+# Raises: ValueError: Data must be <= 100
+
+# Exclusive bounds with inclusive=(False, True)
+@validate
+def process_probability(
+    data: Validated[pd.Series, Between(0, 1, inclusive=(False, True))],
+) -> pd.Series:
+    """Process probabilities in range (0, 1]."""
+    return data
+
+# 0 is excluded, 1 is included
+process_probability(pd.Series([0.5, 1.0]))  # OK
+# process_probability(pd.Series([0.0, 0.5]))  # Fails: 0 not > 0
 ```
 
 ### Column-Specific Validation with HasColumn
@@ -530,13 +602,40 @@ Validation logic is pre-compiled at import time (when the decorator runs). The r
 
 ## Configuration & Memory Efficiency
 
-### Config Overrides
+### Global Configuration
 
-You can temporarily change global configuration settings using the `config.overrides()` context manager. This is useful for testing or specific processing blocks.
+Access the global configuration via `datawarden.config`:
+
+```python
+from datawarden.config import get_config, overrides, reset_config
+
+# View current settings
+config = get_config()
+print(config.skip_validation)     # False
+print(config.warn_only)           # False
+print(config.chunk_size_rows)     # None
+print(config.parallel_threshold_rows)  # 50000
+print(config.max_workers)         # 4
+```
+
+**Available Configuration Options:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `skip_validation` | `bool` | `False` | Skip all validation globally |
+| `warn_only` | `bool` | `False` | Warn instead of raising on validation failures |
+| `chunk_size_rows` | `int \| None` | `None` | Process data in chunks of N rows (memory optimization) |
+| `parallel_threshold_rows` | `int` | `50000` | Min rows to trigger parallel validation |
+| `max_workers` | `int` | `4` | Max threads for parallel validation |
+
+### Config Overrides (Context Manager)
+
+Temporarily change settings using `overrides()`:
 
 ```python
 from datawarden.config import overrides
 from datawarden import validate, Validated, Finite
+import pandas as pd
 
 @validate
 def heavy_process(data: Validated[pd.DataFrame, Finite]):
@@ -546,10 +645,14 @@ def heavy_process(data: Validated[pd.DataFrame, Finite]):
 with overrides(skip_validation=True):
     heavy_process(large_df)
 
-# Or change warn_only mode
+# Warn instead of raise (useful for debugging)
 with overrides(warn_only=True):
     heavy_process(dirty_data)
-```
+
+# Combine overrides for debugging large datasets
+with overrides(warn_only=True, chunk_size_rows=50_000):
+    # Validates in chunks, warns on failures instead of raising
+    heavy_process(huge_df)
 
 ### Memory-Efficient Chunking
 
