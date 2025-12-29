@@ -252,12 +252,19 @@ def validate[**P, R](
       )
 
       # Check for skip_validation in kwargs
-      skip = kwargs.pop("skip_validation", effective_skip_default)
+      if "skip_validation" in sig.parameters:
+        skip = kwargs.get("skip_validation", effective_skip_default)
+      else:
+        skip = kwargs.pop("skip_validation", effective_skip_default)
+
       if skip:
         return func(*args, **kwargs)
 
       # Check for warn_only in kwargs (explicit cast to bool for type checkers)
-      warn_only = bool(kwargs.pop("warn_only", effective_warn_default))
+      if "warn_only" in sig.parameters:
+        warn_only = bool(kwargs.get("warn_only", effective_warn_default))
+      else:
+        warn_only = bool(kwargs.pop("warn_only", effective_warn_default))
 
       # Bind arguments
       bound_args = sig.bind(*args, **kwargs)

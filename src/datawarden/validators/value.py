@@ -586,10 +586,12 @@ class OneOf(Validator[pd.Series | pd.Index]):
         )
     else:
       # isinstance(data, pd.Series) implied
-      invalid = set(data.dropna().unique()) - self.allowed
-      if invalid:
-        raise ValueError(
-          f"Values must be one of {self.allowed}, got invalid: {invalid}"
+      # Vectorized check using isin() - much faster for large series
+      mask = ~data.isin(self.allowed) & data.notna()
+      if mask.any():
+        invalid = set(pd.unique(data[mask]))
+        report_failures(
+          data, mask, f"Values must be one of {self.allowed}, got invalid: {invalid}"
         )
 
 
