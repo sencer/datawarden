@@ -6,7 +6,7 @@ from typing import Any, override
 
 import pandas as pd
 
-from datawarden.base import Validator
+from datawarden.base import Priority, Validator
 from datawarden.utils import instantiate_validator
 
 
@@ -30,6 +30,8 @@ class Datetime(Validator[pd.Series | pd.Index]):
     ```
   """
 
+  priority = Priority.COMPLEX
+
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
     if isinstance(data, pd.Index) and not isinstance(data, pd.DatetimeIndex):
@@ -49,10 +51,8 @@ class Unique(Validator[pd.Series | pd.Index]):
   Can be applied directly to pd.Index or pd.Series values.
   """
 
-  @property
-  @override
-  def is_chunkable(self) -> bool:
-    return False
+  priority = Priority.COMPLEX
+  is_chunkable = False
 
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
@@ -75,10 +75,7 @@ class MonoUp(Validator[pd.Series | pd.Index]):
   Priority: 20 (Complex Vectorized).
   """
 
-  @property
-  @override
-  def priority(self) -> int:
-    return 20
+  priority = Priority.COMPLEX
 
   def __init__(self) -> None:
     super().__init__()
@@ -125,10 +122,7 @@ class MonoDown(Validator[pd.Series | pd.Index]):
   Priority: 20 (Complex Vectorized).
   """
 
-  @property
-  @override
-  def priority(self) -> int:
-    return 20
+  priority = Priority.COMPLEX
 
   def __init__(self) -> None:
     super().__init__()
@@ -179,10 +173,7 @@ class Index(Validator[pd.Series | pd.DataFrame | pd.Index]):
   Priority: 20 (Complex Vectorized) - Runs after simple checks but before slow holistic checks.
   """
 
-  @property
-  @override
-  def priority(self) -> int:
-    return 20
+  priority = Priority.COMPLEX
 
   def __init__(
     self,
@@ -195,12 +186,7 @@ class Index(Validator[pd.Series | pd.DataFrame | pd.Index]):
       if v:
         instantiated.append(v)
     self.validators = tuple(instantiated)
-
-  @property
-  @override
-  def is_chunkable(self) -> bool:
-    """Only chunkable if ALL inner validators are chunkable."""
-    return all(getattr(v, "is_chunkable", True) for v in self.validators)
+    self.is_chunkable = all(v.is_chunkable for v in instantiated)
 
   @override
   def reset(self) -> None:

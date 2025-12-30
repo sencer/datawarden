@@ -255,14 +255,15 @@ class ValidationDomain:
 
     # Apply Flags Logic
     if self.allows_nan:
-      # If NaNs allowed, wrap strict validators
+      # If NaNs allowed, wrap strict validators in IgnoringNaNs
       wrapped_vals: list[Validator[Any]] = [
         IgnoringNaNs(v, _check_syntax=False) for v in vals
       ]
       vals = wrapped_vals
 
       if not self.allows_inf:
-        vals.append(IgnoringNaNs(Finite, _check_syntax=False))
+        # Finite already allows NaN, no need to wrap in IgnoringNaNs
+        vals.append(Finite())
     # Strict mode (NaNs not allowed)
     # vals are already strict (Ge/Le check for NaN and fail)
 

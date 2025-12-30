@@ -77,6 +77,23 @@ calculate_returns(bad_prices)
 - **`OneOf("a", "b", "c")`** - Ensures values are in allowed set (categorical)
 - **`IsDtype(dtype)`** - Ensures data has specific dtype (e.g. `int64`, `float`)
 
+### Mixed-type Handling
+
+The `Finite` and `StrictFinite` validators handle mixed-type data (e.g., DataFrames with both numeric and string columns) automatically:
+
+- **DataFrames**: They automatically select and validate **only numeric columns**. Non-numeric columns (strings, objects, datetimes) are silently ignored. This allows applying these validators to entire DataFrames conveniently.
+- **Series/Index**: They require a numeric dtype. Applying them to a string Series will raise a `TypeError`.
+
+```python
+# DataFrame: Passes (ignores string column 'label')
+df = pd.DataFrame({"value": [1.0, 2.0], "label": ["a", "b"]})
+Finite().validate(df)
+
+# Series: Raises TypeError (requires numeric data)
+s = pd.Series(["a", "b"])
+Finite().validate(s) # Raises TypeError
+```
+
 ### NaN-Tolerant Validation with IgnoringNaNs
 
 The `IgnoringNaNs` wrapper allows validators to skip NaN values during validation. It can be used in two ways:
