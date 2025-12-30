@@ -21,11 +21,13 @@ class Datetime(Validator[pd.Series | pd.Index]):
     Index(Datetime) - validates the index is a DatetimeIndex
 
   Example:
+    ```python
     # Validate Series contains datetime values
     data: Validated[pd.Series, Datetime]
 
     # Validate DataFrame has datetime index
     data: Validated[pd.DataFrame, Index(Datetime)]
+    ```
   """
 
   @override
@@ -168,9 +170,11 @@ class Index(Validator[pd.Series | pd.DataFrame | pd.Index]):
   - E.g., Index(Unique) IS NOT chunkable.
 
   Can be used to apply validators to the index:
-  - Index(Datetime) - Check index is DatetimeIndex
-  - Index(MonoUp) - Check index is monotonically increasing
-  - Index(Datetime, MonoUp) - Check both
+    ```python
+    - Index(Datetime) - Check index is DatetimeIndex
+    - Index(MonoUp) - Check index is monotonically increasing
+    - Index(Datetime, MonoUp) - Check both
+    ```
 
   Priority: 20 (Complex Vectorized) - Runs after simple checks but before slow holistic checks.
   """

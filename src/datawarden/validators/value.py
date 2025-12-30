@@ -47,11 +47,13 @@ class IgnoringNaNs(Validator[pd.Series | pd.DataFrame | pd.Index], MetaValidator
   and pd.Index (including nested index validators like Index(Datetime)).
 
   Example:
+    ```python
     # Allow NaN values but enforce that non-NaN values are >= 0
     data: Validated[pd.Series, IgnoringNaNs(Ge(0))]
 
     # All validators ignore NaNs
     data: Validated[pd.Series, Ge(0), Lt(100), IgnoringNaNs()]
+    ```
   """
 
   def __init__(
@@ -137,9 +139,11 @@ class AllowNaN(Validator[pd.Series | pd.DataFrame | pd.Index]):
   Used to override a global NonNaN constraint locally.
 
   Example:
+    ```python
     @validate
     def process(df: Validated[pd.DataFrame, NonNaN, HasColumn("optional", AllowNaN)]):
         ...
+    ```
   """
 
   @override
@@ -153,9 +157,11 @@ class AllowInf(Validator[pd.Series | pd.DataFrame | pd.Index]):
   Used to override a global Finite/StrictFinite constraint locally.
 
   Example:
+    ```python
     @validate
     def process(df: Validated[pd.DataFrame, Finite, HasColumn("slope", AllowInf)]):
         ...
+    ```
   """
 
   @override
@@ -170,8 +176,10 @@ class Finite(Validator[pd.Series | pd.DataFrame | pd.Index]):
   Use with NonNaN if you need to reject both Inf and NaN.
 
   Example:
+    ```python
     Validated[pd.Series, Finite]           # No Inf, allows NaN
     Validated[pd.Series, Finite, NonNaN]   # No Inf, no NaN
+    ```
   """
 
   @property
@@ -422,11 +430,13 @@ class Between(Validator[pd.Series | pd.DataFrame | pd.Index]):
     inclusive: Tuple of (lower_inclusive, upper_inclusive). Default (True, True).
 
   Example:
+    ```python
     # Values must be in [0, 100]
     data: Validated[pd.Series, Between(0, 100)]
 
     # Values must be in (0, 1] (exclusive lower, inclusive upper)
     data: Validated[pd.Series, Between(0, 1, inclusive=(False, True))]
+    ```
   """
 
   @property
@@ -498,6 +508,7 @@ class Is(Validator[pd.Series | pd.DataFrame | pd.Index]):
   Validates that all values satisfy the given predicate.
 
   Example:
+    ```python
     # Check all values are in range [0, 100]
     data: Validated[pd.Series, Is(lambda x: (x >= 0) & (x <= 100))]
 
@@ -506,6 +517,7 @@ class Is(Validator[pd.Series | pd.DataFrame | pd.Index]):
 
     # With descriptive name for error messages
     data: Validated[pd.Series, Is(lambda x: x > 0, name="values must be positive")]
+    ```
   """
 
   def __init__(
@@ -573,8 +585,10 @@ class Rows(Validator[pd.DataFrame]):
   Validates that all rows satisfy the given predicate.
 
   Example:
+    ```python
     # Check each row sums to less than 100
     data: Validated[pd.DataFrame, Rows(lambda row: row.sum() < 100)]
+    ```
 
   Performance Note:
     This validator uses DataFrame.apply(axis=1) internally, which iterates
@@ -582,8 +596,10 @@ class Rows(Validator[pd.DataFrame]):
     slower than vectorized operations.
 
   Optimization Example:
+    ```python
     # ❌ SLOW: Row-wise (Python loop)
     # Rows(lambda row: row["a"] + row["b"] == row["c"])
+    ```
 
     Note: The vectorized version using Is() is much faster as it avoids
     Python-level row iteration.
@@ -641,13 +657,15 @@ class OneOf(Validator[pd.Series | pd.Index]):
     extremely efficient for large datasets compared to manual set iteration.
 
   Example:
-  - OneOf("a", "b", "c")
+    ```python
+    # OneOf("a", "b", "c")
 
-  Can be used with Index wrapper for index validation:
-  - Index(OneOf("x", "y", "z"))
+    # Can be used with Index wrapper for index validation:
+    # Index(OneOf("x", "y", "z"))
 
-  Can be used with HasColumn for column-specific validation:
-  - HasColumn("category", OneOf("a", "b", "c"))
+    # Can be used with HasColumn for column-specific validation:
+    # HasColumn("category", OneOf("a", "b", "c"))
+    ```
   """
 
   def __init__(self, *allowed: object) -> None:
@@ -749,11 +767,13 @@ class Shape(Validator[pd.Series | pd.DataFrame | pd.Index]):
   """Validator for DataFrame/Series dimensions.
 
   Supports exact values, constraints, or Any for flexible validation:
-  - Shape(10, 5) - Exactly 10 rows, 5 columns
-  - Shape(Ge(10), Any) - At least 10 rows, any columns
-  - Shape(Any, Le(5)) - Any rows, at most 5 columns
-  - Shape(Gt(0), Lt(100)) - More than 0 rows, less than 100 columns
-  - Shape(100) - For Series: exactly 100 rows
+    ```python
+    - Shape(10, 5) - Exactly 10 rows, 5 columns
+    - Shape(Ge(10), Any) - At least 10 rows, any columns
+    - Shape(Any, Le(5)) - Any rows, at most 5 columns
+    - Shape(Gt(0), Lt(100)) - More than 0 rows, less than 100 columns
+    - Shape(100) - For Series: exactly 100 rows
+    ```
 
   For Series, only the first dimension (rows) is checked.
 
