@@ -49,13 +49,20 @@ jobs:
         source .venv/bin/activate
         pytest --cov=src --cov-report=xml --cov-report=term-missing
 
-    - name: Upload coverage to Codecov (optional)
-      uses: codecov/codecov-action@v5
-      if: matrix.python-version == '3.12'
+    - name: Check for performance regressions
+      run: |
+        source .venv/bin/activate
+        python benchmarks/check_regression.py
+
+  scan:
+    name: Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: OSV-Scanner
+      uses: google/osv-scanner-action/osv-scanner-action@v1
       with:
-        file: ./coverage.xml
-        fail_ci_if_error: false
-        token: ${{ secrets.CODECOV_TOKEN }}
+        scan-args: --recursive ./
 
   build:
     name: Build distribution
