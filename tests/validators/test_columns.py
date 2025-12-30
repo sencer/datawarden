@@ -127,9 +127,35 @@ class TestIsDtype:
     validator = HasColumns(["a"])
     assert validator.validate(df) is None
 
+  def test_reset_propagation_has_columns(self):
+    """MEDIUM: reset() should propagate through HasColumns."""
+    mono = MonoUp()
+    v = HasColumns(["a"])
+    v.validators = (mono,)
+
+    df = pd.DataFrame({"a": [1, 2, 3]})
+    v.validate(df)
+    assert mono._last_val == 3
+
+    v.reset()
+    assert mono._last_val is None, "MonoUp was not reset via HasColumns"
+
 
 class TestHasColumn:
   """Tests for HasColumn wrapper validator."""
+
+  def test_reset_propagation_has_column(self):
+    """MEDIUM: reset() should propagate through HasColumn."""
+    mono = MonoUp()
+    v = HasColumn("a")
+    v.validators = (mono,)  # Manually inject instance to check state
+
+    df = pd.DataFrame({"a": [1, 2, 3]})
+    v.validate(df)
+    assert mono._last_val == 3
+
+    v.reset()
+    assert mono._last_val is None, "MonoUp was not reset via HasColumn"
 
   def test_single_validator(self):
     """Test HasColumn with single validator."""

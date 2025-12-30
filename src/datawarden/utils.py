@@ -75,6 +75,24 @@ def instantiate_validator(
   return None
 
 
+# Fast numeric type detection constants
+NUMERIC_KINDS = frozenset("iufc")
+
+
+def is_numeric(data: pd.Series | pd.Index | pd.DataFrame) -> bool:
+  """Check if data is numeric using a fast kind check.
+
+  Args:
+    data: The pandas object to check.
+
+  Returns:
+    True if numeric, False otherwise.
+  """
+  if isinstance(data, pd.DataFrame):
+    return all(col.kind in NUMERIC_KINDS for col in data.dtypes)
+  return data.dtype.kind in NUMERIC_KINDS
+
+
 def is_pandas_type(annotated_type: object) -> bool:
   """Check if a type annotation represents a pandas type.
 
@@ -86,6 +104,18 @@ def is_pandas_type(annotated_type: object) -> bool:
   Returns:
     True if the type is a pandas Series, DataFrame or Index, False otherwise.
   """
+  # Fallback to module-based detection first - it's fast and handles aliases
+  if hasattr(annotated_type, "__module__"):
+    module = getattr(annotated_type, "__module__", "")
+    # Only match if it's the actual pandas module (not third-party extensions)
+    if module in {
+      "pandas.core.frame",
+      "pandas.core.series",
+      "pandas.core.indexes.base",
+      "pandas.core.indexes.datetimes",
+    }:
+      return True
+
   try:
     if isinstance(annotated_type, type) and issubclass(
       annotated_type, (pd.Series, pd.DataFrame, pd.Index)
@@ -104,18 +134,6 @@ def is_pandas_type(annotated_type: object) -> bool:
         return True
     except TypeError:
       pass
-
-  # Fallback to module-based detection - check for exact pandas module
-  if hasattr(annotated_type, "__module__"):
-    module = getattr(annotated_type, "__module__", "")
-    # Only match if it's the actual pandas module (not third-party extensions)
-    if module in {
-      "pandas.core.frame",
-      "pandas.core.series",
-      "pandas.core.indexes.base",
-      "pandas.core.indexes.datetimes",
-    }:
-      return True
 
   return False
 

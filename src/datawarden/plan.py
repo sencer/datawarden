@@ -6,14 +6,13 @@ import inspect
 import typing
 from typing import Annotated, Any, get_args, get_origin
 
-from datawarden.base import Validator
+from datawarden.base import CompoundValidator, Validator
 from datawarden.exceptions import LogicError
 from datawarden.protocols import MetaValidator
-from datawarden.solver import resolve_domains
+from datawarden.solver import is_domain_validator, resolve_domains
 from datawarden.utils import instantiate_validator, is_pandas_type
 from datawarden.validators.columns import HasColumn, HasColumns
-from datawarden.validators.comparison import Ge, Gt, Le, Lt
-from datawarden.validators.value import IgnoringNaNs, Is, Rows, Shape
+from datawarden.validators.value import AllowInf, AllowNaN, IgnoringNaNs
 
 
 class ValidationPlanBuilder:
@@ -80,6 +79,37 @@ class ValidationPlanBuilder:
 
     return arg_validators, arg_base_types
 
+  def _fuse_validators(self, validators: list[Validator[Any]]) -> list[Validator[Any]]:
+    """Group consecutive promotable validators into CompoundValidators.
+
+    This reduces function call overhead and redundant checks in the decorator.
+    """
+    if not validators:
+      return []
+
+    fused = []
+    current_group = []
+
+    for v in validators:
+      if v.is_promotable:
+        current_group.append(v)
+      else:
+        if current_group:
+          if len(current_group) > 1:
+            fused.append(CompoundValidator(current_group))
+          else:
+            fused.append(current_group[0])
+          current_group = []
+        fused.append(v)
+
+    if current_group:
+      if len(current_group) > 1:
+        fused.append(CompoundValidator(current_group))
+      else:
+        fused.append(current_group[0])
+
+    return fused
+
   def _extract_validators(self, metadata: tuple[Any, ...]) -> list[Validator[Any]]:
     """Instantiate and expand validators from Annotated metadata."""
     raw_validators = []
@@ -88,7 +118,16 @@ class ValidationPlanBuilder:
       if v:
         raw_validators.append(v)
 
-    # 1. Handle Markers (e.g. IgnoringNaNs())
+    # 1. Expand MetaValidators
+    expanded_validators = []
+    for v in raw_validators:
+      if isinstance(v, MetaValidator):
+        expanded_validators.extend(v.transform())
+      else:
+        expanded_validators.append(v)
+    raw_validators = expanded_validators
+
+    # 2. Handle Markers (e.g. IgnoringNaNs())
     has_ignoring_nans_marker = any(
       isinstance(v, IgnoringNaNs) and v.is_marker() for v in raw_validators
     )
@@ -105,17 +144,9 @@ class ValidationPlanBuilder:
           wrapped_validators.append(IgnoringNaNs(v, _check_syntax=False))
       raw_validators = wrapped_validators
 
-    # 2. Expand MetaValidators
-    optimized_validators = []
-    for v in raw_validators:
-      if isinstance(v, MetaValidator):
-        optimized_validators.extend(v.transform())
-      else:
-        optimized_validators.append(v)
+    return raw_validators
 
-    return optimized_validators
-
-  def _build_pandas_plan(
+  def _build_pandas_plan(  # noqa: PLR0914
     self, param_name: str, validators: list[Validator[Any]]
   ) -> dict[str, Any]:
     """Build structured validation plan for pandas objects."""
@@ -141,24 +172,58 @@ class ValidationPlanBuilder:
           cloned_specs = [v.clone() for v in specs]
           col_map[str(col)].extend(cloned_specs)
 
-      elif isinstance(v, (Shape, Rows, Is)) or (
-        isinstance(v, (Ge, Le, Gt, Lt)) and len(v.targets) > 1
-      ):
+      elif v.is_holistic:
         holistic.append(v)
       else:
         globals_list.append(v)
 
-    # Resolve Globals
-    resolved_globals = list(globals_list)
+    # Resolve Globals first to catch contradictions
     try:
       # Check for global contradictions (pass empty locals)
-      resolved_globals = resolve_domains(resolved_globals, [])
+      resolved_globals = resolve_domains(list(globals_list), [])
     except Exception as e:
       if isinstance(e, LogicError):
         raise
       raise ValueError(
         f"Global validation conflict in parameter '{param_name}': {e}"
       ) from e
+
+    # 1. Promote eligible global validators to holistic if not overridden.
+    # A validator is promotable if is_promotable=True and it's not present in col_map.
+    # We also check if any local marker (AllowNaN, AllowInf, IgnoringNaNs marker) exists
+    # because they affect how global domain-based validators (Finite, StrictFinite) run.
+    has_markers = any(
+      (
+        isinstance(v, (AllowNaN, AllowInf))
+        or (isinstance(v, IgnoringNaNs) and v.is_marker())
+      )
+      for specs in col_map.values()
+      for v in specs
+    )
+
+    # Check if any column has domain validators - if so, we can't promote
+    # domain validators to holistic since they need per-column resolution
+    cols_have_domain_validators = any(
+      is_domain_validator(v) for specs in col_map.values() for v in specs
+    )
+
+    promoted_globals = []
+    final_globals = []
+    for v in resolved_globals:
+      # If there are ANY markers in the plan, we don't promote to avoid bypassing marker logic
+      # If any column has domain validators, don't promote domain globals (need resolution)
+      if (
+        not has_markers
+        and v.is_promotable
+        and type(v) not in {type(sv) for specs in col_map.values() for sv in specs}
+        and not (cols_have_domain_validators and is_domain_validator(v))
+      ):
+        promoted_globals.append(v)
+      else:
+        final_globals.append(v)
+
+    holistic.extend(promoted_globals)
+    resolved_globals = final_globals
 
     # Resolve Columns
     resolved_columns = {}
@@ -180,9 +245,16 @@ class ValidationPlanBuilder:
     for col_validators in resolved_columns.values():
       col_validators.sort(key=lambda v: v.priority)  # pyright: ignore[reportUnknownLambdaType]
 
+    # Fuse consecutive promotable validators for performance
+    fused_holistic = self._fuse_validators(holistic)
+    fused_default = self._fuse_validators(resolved_globals)
+    fused_columns = {
+      col: self._fuse_validators(specs) for col, specs in resolved_columns.items()
+    }
+
     return {
-      "holistic": holistic,
-      "columns": resolved_columns,
-      "default": resolved_globals,
+      "holistic": fused_holistic,
+      "columns": fused_columns,
+      "default": fused_default,
       "has_col_checks": bool(col_map),
     }

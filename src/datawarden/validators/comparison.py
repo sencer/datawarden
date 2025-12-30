@@ -10,7 +10,7 @@ import pandas as pd
 
 if TYPE_CHECKING:
   from collections.abc import Callable
-from datawarden.base import Validator
+from datawarden.base import Priority, Validator
 from datawarden.utils import report_failures, scalar_any
 
 
@@ -33,6 +33,9 @@ class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
     super().__init__()
     self.targets = targets
     self.ignore_nan = ignore_nan
+    self.priority = Priority.VECTORIZED
+    self.is_holistic = len(targets) > 1
+    self.is_promotable = not self.is_holistic  # Unary comparisons are promotable
 
   @override
   def __repr__(self) -> str:
@@ -54,27 +57,30 @@ class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
       return f"{self.op_symbol} {self.targets[0]}"
     return f"{self.__class__.__name__}({self.targets})"
 
-  def with_ignore_nan(self) -> _ComparisonValidator:
-    """Return a copy of this validator that ignores NaN values."""
-    return self.__class__(*self.targets, ignore_nan=True)
-
-  @property
-  @override
-  def priority(self) -> int:
-    return 10
-
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     # Check for NaN values before comparison
-    # Access .values once
-    vals = data if isinstance(data, pd.Index) else data.values
+    if not self.ignore_nan:
+      if isinstance(data, pd.DataFrame) and len(self.targets) > 1:
+        # N-ary mode: only check columns involved in the comparison
+        relevant_cols = [t for t in self.targets if isinstance(t, str)]
 
-    if not self.ignore_nan and np.any(mask_nan := pd.isna(vals)):  # pyright: ignore
-      report_failures(
-        data,
-        mask_nan,  # pyright: ignore
-        f"Cannot perform {self.op_symbol} comparison with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
-      )
+        # Check columns exist - fail explicitly rather than silently passing
+        missing = [c for c in relevant_cols if c not in data.columns]
+        if missing:
+          raise ValueError(f"Missing columns for comparison: {missing}")
+
+        vals_to_check = data[relevant_cols].values
+      else:
+        # Unary mode or Series/Index: check all values
+        vals_to_check = data if isinstance(data, pd.Index) else data.values
+
+      if np.any(mask_nan := pd.isna(vals_to_check)):
+        report_failures(
+          data,
+          mask_nan,  # pyright: ignore
+          f"Cannot perform {self.op_symbol} comparison with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
+        )
 
     if len(self.targets) == 1:
       # Unary comparison: data op target
@@ -97,11 +103,6 @@ class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
 
         if not isinstance(col1, str) or not isinstance(col2, str):
           raise TypeError("Column comparison requires string column names")
-
-        # Check columns exist - fail explicitly rather than silently passing
-        missing = [c for c in (col1, col2) if c not in data.columns]
-        if missing:
-          raise ValueError(f"Missing columns for comparison: {missing}")
 
         col1_vals = data[col1].values
         col2_vals = data[col2].values

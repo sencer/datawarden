@@ -18,11 +18,24 @@ from typing import (
 from loguru import logger
 import pandas as pd
 
+from datawarden.base import Priority
 from datawarden.config import get_config
 from datawarden.plan import ValidationPlanBuilder
-from datawarden.utils import get_chunks
+from datawarden.utils import get_chunks, is_numeric
 
 _shared_executor: concurrent.futures.ThreadPoolExecutor | None = None
+
+
+def _reset_validators(item: Any) -> None:
+  """Recursively reset all validators in a plan or list."""
+  if isinstance(item, list):
+    for v in item:
+      _reset_validators(v)
+  elif isinstance(item, dict):
+    for val in item.values():
+      _reset_validators(val)
+  elif hasattr(item, "reset"):
+    item.reset()
 
 
 def _get_executor() -> concurrent.futures.ThreadPoolExecutor:
@@ -140,6 +153,9 @@ def validate[**P, R](
           raise TypeError(msg)
 
       if arg_name in arg_validators:
+        if value is None:
+          return True
+
         validators = arg_validators[arg_name]
 
         # Plan-based validation (Dict)
@@ -150,24 +166,30 @@ def validate[**P, R](
           columns = plan.get("columns", {})
           has_col_checks = plan.get("has_col_checks", False)
 
-          # Split holistic validators into fast (priority <= 20) and slow (priority > 20)
-          # Fast: Shape(0), Vectorized(10), Complex(20)
-          # Slower checks: Rows(100)
-          priority_threshold = 20
-          fast_holistic = [
-            v for v in holistic if getattr(v, "priority", 50) <= priority_threshold
-          ]
-          slow_holistic = [
-            v for v in holistic if getattr(v, "priority", 50) > priority_threshold
-          ]
+          # Split holistic validators into fast (priority <= COMPLEX) and slow (priority > COMPLEX)
+          # Fast: Shape(STRUCTURAL), Vectorized(VECTORIZED), Complex(COMPLEX)
+          # Slower checks: Rows(SLOW)
+          priority_threshold = Priority.COMPLEX
+          fast_holistic = [v for v in holistic if v.priority <= priority_threshold]
+          slow_holistic = [v for v in holistic if v.priority > priority_threshold]
+
+          # Lazy numeric check for holistic object
+          value_is_numeric = None
 
           # 1. Fast Holistic Checks (e.g. Shape, properties)
           for v in fast_holistic:
-            is_chunkable = getattr(v, "is_chunkable", True)
+            is_chunkable = v.is_chunkable
             if mode == "chunkable" and not is_chunkable:
               continue
             if mode == "non-chunkable" and is_chunkable:
               continue
+
+            # Skip numeric-only validators if whole object is not numeric
+            if v.is_numeric_only:
+              if value_is_numeric is None:
+                value_is_numeric = is_numeric(value)
+              if not value_is_numeric:
+                continue
 
             try:
               v.validate(value)
@@ -197,6 +219,11 @@ def validate[**P, R](
 
               # Determine active validators
               active_v = columns[col_name] if col_name in columns else plan["default"]
+              if not active_v:
+                continue
+
+              # Lazy check for numeric status of this column
+              col_is_numeric = None
 
               # Execute
               for v in active_v:
@@ -205,6 +232,13 @@ def validate[**P, R](
                   continue
                 if mode == "non-chunkable" and is_chunkable:
                   continue
+
+                # Skip numeric-only validators for non-numeric columns
+                if v.is_numeric_only:
+                  if col_is_numeric is None:
+                    col_is_numeric = is_numeric(col_data)
+                  if not col_is_numeric:
+                    continue
 
                 try:
                   v.validate(col_data)
@@ -218,11 +252,18 @@ def validate[**P, R](
           if isinstance(value, (pd.Series, pd.Index)):
             # Series/Index uses 'default' validators (Globals) + Holistic (already ran)
             for v in plan["default"]:
-              is_chunkable = getattr(v, "is_chunkable", True)
+              is_chunkable = v.is_chunkable
               if mode == "chunkable" and not is_chunkable:
                 continue
               if mode == "non-chunkable" and is_chunkable:
                 continue
+
+              # Skip numeric-only validators if object is not numeric
+              if v.is_numeric_only:
+                if value_is_numeric is None:
+                  value_is_numeric = is_numeric(value)
+                if not value_is_numeric:
+                  continue
 
               try:
                 v.validate(value)
@@ -235,7 +276,7 @@ def validate[**P, R](
 
           # 4. Slow Holistic Checks (e.g. Rows)
           for v in slow_holistic:
-            is_chunkable = getattr(v, "is_chunkable", True)
+            is_chunkable = v.is_chunkable
             if mode == "chunkable" and not is_chunkable:
               continue
             if mode == "non-chunkable" and is_chunkable:
@@ -253,7 +294,7 @@ def validate[**P, R](
         # List-based validation (Legacy/Standard)
         elif isinstance(validators, list):
           for v in validators:
-            is_chunkable = getattr(v, "is_chunkable", True)
+            is_chunkable = v.is_chunkable
             if mode == "chunkable" and not is_chunkable:
               continue
             if mode == "non-chunkable" and is_chunkable:
@@ -407,18 +448,7 @@ def validate[**P, R](
           warn_only = bool(bound_arguments.get("warn_only", effective_warn_default))
 
       # Reset all validators to clear any state from previous runs
-      for plan_or_list in arg_validators.values():
-        if isinstance(plan_or_list, dict):
-          for v in plan_or_list["holistic"]:
-            v.reset()
-          for v_list in plan_or_list["columns"].values():
-            for v in v_list:
-              v.reset()
-          for v in plan_or_list["default"]:
-            v.reset()
-        elif isinstance(plan_or_list, list):
-          for v in plan_or_list:
-            v.reset()
+      _reset_validators(arg_validators)
 
       # Filter items that need validation
       items_to_validate = [

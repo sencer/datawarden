@@ -91,8 +91,11 @@ def test_chunked_validation():
     assert process(df) is True
 
   # Invalid data in second chunk
-  df_invalid = pd.DataFrame({"A": [1.0, 2.0, -1.0, 4.0], "B": [10.0, 11.0, 12.0, 13.0]})
-  with overrides(chunk_size_rows=2), pytest.raises(ValueError, match="Ge"):
+  df_invalid = pd.DataFrame({"A": [1.0, 2.0, -3.0], "B": [1.0, 2.0, 3.0]})
+  with (
+    overrides(chunk_size_rows=2),
+    pytest.raises(ValueError, match=r"(Ge|CompoundValidator)"),
+  ):
     process(df_invalid)
 
 

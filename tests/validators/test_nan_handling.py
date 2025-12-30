@@ -12,16 +12,57 @@ from datawarden import (
   Ge,
   IgnoringNaNs,
   Index,
+  Is,
   Le,
   Lt,
+  MonoUp,
   NonNegative,
   Positive,
+  Shape,
   validate,
 )
 
 
 class TestIgnoringNaNsWrapper:
   """Test the IgnoringNaNs wrapper validator."""
+
+  def test_ignoring_nans_holistic_is(self):
+    """CRITICAL: IgnoringNaNs should pass the whole DataFrame to holistic Is."""
+
+    @validate
+    def func(
+      df: Annotated[pd.DataFrame, IgnoringNaNs(Is(lambda df: df["a"] < df["b"]))],
+    ):
+      pass
+
+    # This should pass: non-NaN rows satisfy a < b
+    df = pd.DataFrame({"a": [1, 2, np.nan], "b": [2, 3, 4]})
+    func(df)
+
+  def test_ignoring_nans_holistic_shape(self):
+    """CRITICAL: IgnoringNaNs should work with Shape (which is holistic)."""
+
+    @validate
+    def func(df: Annotated[pd.DataFrame, IgnoringNaNs(Shape(rows=2))]):
+      pass
+
+    # 3 rows total, but only 2 after dropna()
+    df = pd.DataFrame({"a": [1, 2, np.nan], "b": [4, 5, 6]})
+    func(df)
+
+  def test_reset_propagation_ignoring_nans(self):
+    """MEDIUM: reset() should propagate through IgnoringNaNs."""
+    mono = MonoUp()
+    # bypass instantiate_validator by manual assignment
+    v = IgnoringNaNs.__new__(IgnoringNaNs)
+    v.wrapped = mono
+
+    s = pd.Series([1, 2, 3])
+    v.validate(s)
+    assert mono._last_val == 3
+
+    v.reset()
+    assert mono._last_val is None, "MonoUp was not reset via IgnoringNaNs"
 
   def test_marker_mode_basic(self):
     """Test that IgnoringNaNs() marker wraps all validators."""
@@ -249,3 +290,27 @@ class TestComparisonNaNHandling:
     valid_data = pd.Series([10.0, 50.0, 90.0])
     result = process(valid_data)
     assert result.equals(valid_data)
+
+  def test_ge_unrelated_nan_success(self):
+    """Test that Ge does not fail if an unrelated column has a NaN."""
+    # Column 'c' has a NaN, but we only validate 'a' >= 'b'
+    df = pd.DataFrame({"a": [2, 3], "b": [1, 2], "c": [np.nan, 4]})
+    v = Ge("a", "b")
+    # Should pass
+    v.validate(df)
+
+  def test_ignoring_nans_masking_prevention(self):
+    """Test that IgnoringNaNs does not mask errors due to unrelated NaNs."""
+
+    @validate
+    def func(df: Annotated[pd.DataFrame, IgnoringNaNs(Finite)]):
+      pass
+
+    # We want to catch the Inf in 'a', even if 'b' has a NaN
+    df = pd.DataFrame({"a": [np.inf, 10.0], "b": [np.nan, 2.0]})
+
+    # The transformation should turn IgnoringNaNs(Finite()) into Finite()
+    # because Finite() already ignores NaNs. Finite() is holistic (promoted) and
+    # selects numeric columns surgically.
+    with pytest.raises(ValueError, match="Data must be finite"):
+      func(df)

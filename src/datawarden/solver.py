@@ -30,6 +30,10 @@ def is_domain_validator(
   v: Validator[Any],
 ) -> bool:
   """Check if validator can be mapped to a domain."""
+  if isinstance(v, IgnoringNaNs):
+    # Only treat as domain validator if it's a marker or wraps a domain validator
+    return v.wrapped is None or is_domain_validator(v.wrapped)
+
   return isinstance(
     v,
     (

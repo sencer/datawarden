@@ -7,7 +7,7 @@ from typing import Any, cast, override
 import numpy as np
 import pandas as pd
 
-from datawarden.base import Validator
+from datawarden.base import Priority, Validator
 from datawarden.utils import report_failures
 
 
@@ -62,10 +62,7 @@ class NoTimeGaps(Validator[pd.Series | pd.Index]):
   def __repr__(self) -> str:
     return f"NoTimeGaps({self.freq!r})"
 
-  @property
-  @override
-  def priority(self) -> int:
-    return 20
+  priority = Priority.COMPLEX
 
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
@@ -137,10 +134,7 @@ class MaxGap(Validator[pd.Series | pd.Index]):
   def __repr__(self) -> str:
     return f"MaxGap({self.max_gap!r})"
 
-  @property
-  @override
-  def priority(self) -> int:
-    return 20
+  priority = Priority.COMPLEX
 
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
@@ -202,10 +196,7 @@ class MaxDiff(Validator[pd.Series]):
     ```
   """
 
-  @property
-  @override
-  def priority(self) -> int:
-    return 20
+  priority = Priority.COMPLEX
 
   def __init__(self, max_diff: float | int, ignore_nan: bool = False) -> None:
     super().__init__()

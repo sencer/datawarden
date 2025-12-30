@@ -7,7 +7,7 @@ from typing import Any, override
 import numpy as np
 import pandas as pd
 
-from datawarden.base import Validator
+from datawarden.base import Priority, Validator
 from datawarden.utils import instantiate_validator
 
 
@@ -17,11 +17,7 @@ class IsDtype(Validator[pd.Series | pd.DataFrame]):
   def __init__(self, dtype: str | type | np.dtype) -> None:
     super().__init__()
     self.dtype = np.dtype(dtype)
-
-  @property
-  @override
-  def priority(self) -> int:
-    return 0
+    self.priority = Priority.STRUCTURAL
 
   @override
   def validate(self, data: pd.Series | pd.DataFrame) -> None:
@@ -61,17 +57,12 @@ class HasColumns(Validator[pd.DataFrame]):
       if v:
         instantiated.append(v)
     self.validators = tuple(instantiated)
+    self.is_chunkable = all(v.is_chunkable for v in instantiated)
 
-  @property
   @override
-  def priority(self) -> int:
-    return 0
-
-  @property
-  @override
-  def is_chunkable(self) -> bool:
-    """Only chunkable if ALL inner validators are chunkable."""
-    return all(getattr(v, "is_chunkable", True) for v in self.validators)
+  def reset(self) -> None:
+    for v in self.validators:
+      v.reset()
 
   @override
   def validate(self, data: pd.DataFrame) -> None:
@@ -116,12 +107,12 @@ class HasColumn(Validator[pd.DataFrame]):
       if v:
         instantiated.append(v)
     self.validators = tuple(instantiated)
+    self.is_chunkable = all(v.is_chunkable for v in instantiated)
 
-  @property
   @override
-  def is_chunkable(self) -> bool:
-    """Only chunkable if ALL inner validators are chunkable."""
-    return all(getattr(v, "is_chunkable", True) for v in self.validators)
+  def reset(self) -> None:
+    for v in self.validators:
+      v.reset()
 
   @override
   def validate(self, data: pd.DataFrame) -> None:
