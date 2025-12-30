@@ -76,3 +76,4 @@ digest.txt
 basedpyright_output*.txt
 site/
 profile.stats
+.hypothesis/
