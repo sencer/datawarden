@@ -111,7 +111,7 @@ def validate[**P, R](
     builder = ValidationPlanBuilder(func)
     arg_validators, arg_base_types = builder.build()
 
-    def validate_arg(
+    def validate_arg(  # noqa: PLR0914
       arg_name: str,
       value: Any,
       warn_only: bool,
@@ -146,8 +146,23 @@ def validate[**P, R](
         if isinstance(validators, dict):
           plan = validators
 
-          # Common: Holistic Validators
-          for v in plan["holistic"]:
+          holistic = plan.get("holistic", [])
+          columns = plan.get("columns", {})
+          has_col_checks = plan.get("has_col_checks", False)
+
+          # Split holistic validators into fast (priority <= 20) and slow (priority > 20)
+          # Fast: Shape(0), Vectorized(10), Complex(20)
+          # Slower checks: Rows(100)
+          priority_threshold = 20
+          fast_holistic = [
+            v for v in holistic if getattr(v, "priority", 50) <= priority_threshold
+          ]
+          slow_holistic = [
+            v for v in holistic if getattr(v, "priority", 50) > priority_threshold
+          ]
+
+          # 1. Fast Holistic Checks (e.g. Shape, properties)
+          for v in fast_holistic:
             is_chunkable = getattr(v, "is_chunkable", True)
             if mode == "chunkable" and not is_chunkable:
               continue
@@ -166,8 +181,8 @@ def validate[**P, R](
           # DataFrame Specifics
           if isinstance(value, pd.DataFrame):
             # 2. Check Missing Columns (Only in non-chunkable or all)
-            if mode != "chunkable" and plan["has_col_checks"]:
-              specified_cols = plan["columns"].keys()
+            if mode != "chunkable" and has_col_checks:
+              specified_cols = columns.keys()
               missing = [c for c in specified_cols if c not in value.columns]
               if missing:
                 msg = f"Missing columns: {missing}"
@@ -181,10 +196,7 @@ def validate[**P, R](
               col_data = value[col_name]
 
               # Determine active validators
-              if col_name in plan["columns"]:
-                active_v = plan["columns"][col_name]
-              else:
-                active_v = plan["default"]
+              active_v = columns[col_name] if col_name in columns else plan["default"]
 
               # Execute
               for v in active_v:
@@ -203,7 +215,7 @@ def validate[**P, R](
                     return False
                   raise type(e)(msg) from e
 
-          elif isinstance(value, (pd.Series, pd.Index)):
+          if isinstance(value, (pd.Series, pd.Index)):
             # Series/Index uses 'default' validators (Globals) + Holistic (already ran)
             for v in plan["default"]:
               is_chunkable = getattr(v, "is_chunkable", True)
@@ -220,6 +232,23 @@ def validate[**P, R](
                   logger.error(msg)
                   return False
                 raise type(e)(msg) from e
+
+          # 4. Slow Holistic Checks (e.g. Rows)
+          for v in slow_holistic:
+            is_chunkable = getattr(v, "is_chunkable", True)
+            if mode == "chunkable" and not is_chunkable:
+              continue
+            if mode == "non-chunkable" and is_chunkable:
+              continue
+
+            try:
+              v.validate(value)
+            except Exception as e:
+              msg = f"Validation failed for parameter '{arg_name}' in '{func.__name__}' ({type(v).__name__}): {e}"
+              if warn_only:
+                logger.error(msg)
+                return False
+              raise type(e)(msg) from e
 
         # List-based validation (Legacy/Standard)
         elif isinstance(validators, list):
@@ -244,8 +273,23 @@ def validate[**P, R](
               raise type(e)(msg) from e
       return True
 
+    # Pre-compute signature details for fast binding
+    parameters = list(sig.parameters.values())
+    arg_names = [p.name for p in parameters]
+
+    # Check if we have var-args (args/kwargs) which complicate fast path
+    has_var_args = any(
+      p.kind in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}
+      for p in parameters
+    )
+
+    # Pre-compute defaults mapping
+    defaults = {
+      p.name: p.default for p in parameters if p.default is not inspect.Parameter.empty
+    }
+
     @functools.wraps(func)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R | None:
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R | None:  # noqa: PLR0914
       # Resolve defaults
       config = get_config()
       effective_skip_default = (
@@ -257,29 +301,114 @@ def validate[**P, R](
         warn_only_by_default if warn_only_by_default is not None else config.warn_only
       )
 
-      # Check for skip_validation in kwargs
-      if "skip_validation" in sig.parameters:
-        skip = kwargs.get("skip_validation", effective_skip_default)
+      # Fast path variables
+      skip = effective_skip_default
+      warn_only = effective_warn_default
+      bound_arguments = {}
+      skip_in_sig = False
+      warn_in_sig = False
+
+      # Determine if we can use fast path
+      if not has_var_args:
+        # Fast path: Manual mapping
+        if len(args) > len(arg_names):
+          raise TypeError(
+            f"{func.__name__} takes {len(arg_names)} positional arguments but {len(args)} were given"
+          )
+
+        # Map positional args
+        for i, value in enumerate(args):
+          bound_arguments[arg_names[i]] = value
+
+        # Merge kwargs
+        for name, value in kwargs.items():
+          if name in bound_arguments:
+            raise TypeError(
+              f"{func.__name__} got multiple values for argument '{name}'"
+            )
+
+          # Enforce known arguments (excluding skip/warn which are allowed)
+          if name not in arg_names and name not in {"skip_validation", "warn_only"}:
+            raise TypeError(
+              f"{func.__name__} got an unexpected keyword argument '{name}'"
+            )
+
+          bound_arguments[name] = value
+
+        # Apply defaults for missing args
+        for name, default_val in defaults.items():
+          if name not in bound_arguments:
+            bound_arguments[name] = default_val
+
+        skip_in_sig = "skip_validation" in arg_names
+        warn_in_sig = "warn_only" in arg_names
+
+        # Determine skip
+        if skip_in_sig:
+          skip = bound_arguments.get("skip_validation", effective_skip_default)
+        else:
+          skip = kwargs.get("skip_validation", effective_skip_default)
+
+          if skip:
+            # If we need to strip skip_validation from kwargs before calling:
+            if not skip_in_sig and "skip_validation" in kwargs:
+              # Return func with cleaned kwargs
+              return func(
+                *args, **{k: v for k, v in kwargs.items() if k != "skip_validation"}
+              )  # pyright: ignore[reportCallIssue]
+            return func(*args, **kwargs)  # pyright: ignore[reportCallIssue]
+
+        # Determine warn_only
+        if warn_in_sig:
+          warn_only = bool(bound_arguments.get("warn_only", effective_warn_default))
+        else:
+          warn_only = bool(kwargs.get("warn_only", effective_warn_default))
+
       else:
-        skip = kwargs.pop("skip_validation", effective_skip_default)
+        # Slow path (fallback to bind)
+        # We need to handle skip_validation/warn_only carefully if they are not in sig.
 
-      if skip:
-        return func(*args, **kwargs)
+        # Check kwargs for magic params before bind (since bind would fail if not in sig)
+        kwargs_copy = None
 
-      # Check for warn_only in kwargs (explicit cast to bool for type checkers)
-      if "warn_only" in sig.parameters:
-        warn_only = bool(kwargs.get("warn_only", effective_warn_default))
-      else:
-        warn_only = bool(kwargs.pop("warn_only", effective_warn_default))
+        if "skip_validation" not in sig.parameters and "skip_validation" in kwargs:
+          if kwargs_copy is None:
+            kwargs_copy = kwargs.copy()
+          skip = kwargs_copy.pop("skip_validation")
+        elif "skip_validation" in sig.parameters:
+          # Will be extracted from bound args
+          # Initialize with default for logic below (will be overwritten if present)
+          skip = effective_skip_default
+        else:
+          skip = effective_skip_default
 
-      # Bind arguments
-      bound_args = sig.bind(*args, **kwargs)
-      bound_args.apply_defaults()
+        if "warn_only" not in sig.parameters and "warn_only" in kwargs:
+          if kwargs_copy is None:
+            kwargs_copy = kwargs.copy()
+          warn_only = bool(kwargs_copy.pop("warn_only"))
+        else:
+          # Will be extracted later or use default
+          warn_only = effective_warn_default  # Placeholder
+
+        # Use cleaned kwargs for binding
+        final_kwargs_for_bind = kwargs_copy if kwargs_copy is not None else kwargs
+
+        bound = sig.bind(*args, **final_kwargs_for_bind)
+        bound.apply_defaults()
+        bound_arguments = bound.arguments
+
+        if "skip_validation" in sig.parameters:
+          skip = bound_arguments.get("skip_validation", effective_skip_default)
+
+        if skip:
+          return func(*args, **final_kwargs_for_bind)  # pyright: ignore[reportCallIssue]
+
+        if "warn_only" in sig.parameters:
+          warn_only = bool(bound_arguments.get("warn_only", effective_warn_default))
 
       # Reset all validators to clear any state from previous runs
       for plan_or_list in arg_validators.values():
         if isinstance(plan_or_list, dict):
-          # Plan: holistic, columns (dict of lists), default (list)
           for v in plan_or_list["holistic"]:
             v.reset()
           for v_list in plan_or_list["columns"].values():
@@ -293,8 +422,8 @@ def validate[**P, R](
 
       # Filter items that need validation
       items_to_validate = [
-        (name, value)
-        for name, value in bound_args.arguments.items()
+        (name, bound_arguments[name])
+        for name in bound_arguments
         if name in arg_base_types or name in arg_validators
       ]
 
@@ -304,7 +433,6 @@ def validate[**P, R](
       chunk_size = config.chunk_size_rows
 
       # Validate arguments - adaptive threading based on data size
-      # Only use parallel for multiple args with large data, and when chunking is disabled
       total_rows = sum(_estimate_data_size(v) for _, v in items_to_validate)
       use_parallel = (
         len(items_to_validate) > 1
@@ -329,10 +457,10 @@ def validate[**P, R](
           if not _handle_result(name, is_valid):
             return None
       else:
-        # Sequential for single argument, small data, or when chunking is enabled
+        # Sequential
         for name, value in items_to_validate:
           if chunk_size and isinstance(value, (pd.DataFrame, pd.Series, pd.Index)):
-            # 1. Non-chunkable (Full data) - includes type checks
+            # 1. Non-chunkable
             is_valid = validate_arg(name, value, warn_only, mode="non-chunkable")
             if not _handle_result(name, is_valid):
               return None
@@ -347,7 +475,22 @@ def validate[**P, R](
             if not _handle_result(name, is_valid):
               return None
 
-      return func(*bound_args.args, **bound_args.kwargs)
+      # Prepare final arguments for call
+      if not has_var_args:
+        # Fast path cleanup
+        # Need to remove skip/warn if they were in kwargs and not in sig
+        keys_to_remove = set()
+        if not skip_in_sig and "skip_validation" in kwargs:
+          keys_to_remove.add("skip_validation")
+        if not warn_in_sig and "warn_only" in kwargs:
+          keys_to_remove.add("warn_only")
+
+        if keys_to_remove:
+          return func(
+            *args, **{k: v for k, v in kwargs.items() if k not in keys_to_remove}
+          )  # pyright: ignore[reportCallIssue]
+
+      return func(*args, **kwargs)
 
     return wrapper
 

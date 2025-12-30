@@ -107,14 +107,14 @@ class TestIsDtype:
       validator.validate(df)
 
   def test_hascolumns_with_nullable(self):
-    """Test HasColumns with Nullable marker."""
+    """Test HasColumns allows NaN by default."""
     df = pd.DataFrame({"a": [1, np.nan, 3], "b": [4, 5, 6]})
     validator = HasColumns(["a", "b"])
     validator = HasColumns(["a", "b"])
     assert validator.validate(df) is None
 
   def test_hascolumns_with_maybeempty(self):
-    """Test HasColumns with MaybeEmpty marker."""
+    """Test HasColumns allows empty data by default."""
     df = pd.DataFrame({"a": [], "b": []})
     validator = HasColumns(["a", "b"])
     validator = HasColumns(["a", "b"])
@@ -193,14 +193,14 @@ class TestHasColumn:
       validator_missing.validate(data)
 
   def test_hascolumn_with_nullable(self):
-    """Test HasColumn with Nullable marker."""
+    """Test HasColumn allows NaN by default."""
     df = pd.DataFrame({"a": [1, np.nan, 3], "b": [4, 5, 6]})
     validator = HasColumn("a")
     validator = HasColumn("a")
     assert validator.validate(df) is None
 
   def test_hascolumn_with_maybeempty(self):
-    """Test HasColumn with MaybeEmpty marker."""
+    """Test HasColumn allows empty data by default."""
     df = pd.DataFrame({"a": [], "b": []})
     validator = HasColumn("a")
     validator = HasColumn("a")

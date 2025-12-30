@@ -184,7 +184,7 @@ class TestValidatedDecorator:
         return 0
       return data.sum()
 
-    # NaNs allowed due to Nullable
+    # NaNs allowed due to lax settings
     result = process(pd.Series([1.0, np.nan, 3.0]))
     # sum() skips NaNs, so result is 4.0
     assert result == 4.0
@@ -347,8 +347,8 @@ class TestEdgeCases:
     # Should not raise
     assert process(empty_data) == 0
 
-  def test_empty_series_allowed_with_marker(self):
-    """Test validation allows empty Series with MaybeEmpty."""
+  def test_empty_series_allowed_implicitly(self):
+    """Test validation allows empty Series implicitly (default)."""
 
     @validate
     def process(data: Validated[pd.Series, None]):
@@ -358,7 +358,7 @@ class TestEdgeCases:
     result = process(empty_data)
     assert result == 0
 
-  def test_validator_enforces_class_syntax(self):
+  def test_class_enforces_syntax(self):
     """Test that Validator class is required for 0-arg validators."""
 
     @validate
@@ -578,7 +578,7 @@ class TestOptInStrictness:
       process(pd.Series([], dtype=float))
 
   def test_markers_ignored(self):
-    """Test that Nullable/MaybeEmpty markers are effectively ignored."""
+    """Test that explicit None/defaults imply lax validation."""
 
     @validate
     def process(data: Validated[pd.Series, None]):
@@ -769,3 +769,33 @@ class TestParallelExecution:
     # Should return None and log errors, but NOT raise
     result = process_warn(s_invalid, s_invalid, warn_only=True)
     assert result is None
+
+
+def test_decorator_slow_path_varargs():
+  """Test decorator slow path via var-args (*args)."""
+
+  @validate
+  def func(data: Validated[pd.Series, Finite], *_args):
+    return data.sum()
+
+  valid = pd.Series([1, 2])
+  assert func(valid, 1, 2) == 3
+
+  invalid = pd.Series([np.inf])
+  with pytest.raises(ValueError, match="must be finite"):
+    func(invalid, 1, 2)
+
+
+def test_decorator_slow_path_varkwargs():
+  """Test decorator slow path via var-kwargs (**kwargs)."""
+
+  @validate
+  def func(data: Validated[pd.Series, Finite], **_kwargs):
+    return data.sum()
+
+  valid = pd.Series([1, 2])
+  assert func(valid, foo="bar") == 3
+
+  invalid = pd.Series([np.inf])
+  with pytest.raises(ValueError, match="must be finite"):
+    func(invalid, foo="bar")

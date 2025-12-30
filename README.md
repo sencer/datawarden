@@ -75,6 +75,7 @@ calculate_returns(bad_prices)
 - **`MonoDown`** - Ensures values are monotonically decreasing
 - **`Datetime`** - Ensures data is a DatetimeIndex
 - **`OneOf("a", "b", "c")`** - Ensures values are in allowed set (categorical)
+- **`IsDtype(dtype)`** - Ensures data has specific dtype (e.g. `int64`, `float`)
 
 ### NaN-Tolerant Validation with IgnoringNaNs
 
@@ -565,16 +566,27 @@ import pandas as pd
 
 class InRange(Validator):
     """Validator for values within a specific range."""
+    
+    # Priority 20: More complex than simple vector checks (10), but faster than Python loops (100)
+    priority = 20
 
     def __init__(self, min_val: float, max_val: float):
         self.min_val = min_val
         self.max_val = max_val
 
+    @property
+    def is_chunkable(self) -> bool:
+        """Can validate chunks independently."""
+        return True
+
     def validate(self, data):
-        if isinstance(data, (pd.Series, pd.DataFrame)):
-            if (data < self.min_val).any() or (data > self.max_val).any():
-                raise ValueError(f"Data must be in range [{self.min_val}, {self.max_val}]")
-        return data
+        if not isinstance(data, (pd.Series, pd.DataFrame)):
+            raise TypeError("InRange validator requires pandas Series or DataFrame")
+            
+        # Use numpy for performance
+        vals = data.values
+        if (vals < self.min_val).any() or (vals > self.max_val).any():
+            raise ValueError(f"Data must be in range [{self.min_val}, {self.max_val}]")
 
 @validate
 def normalize_percentage(
@@ -583,6 +595,10 @@ def normalize_percentage(
     """Normalize percentage data to [0, 1] range."""
     return data / 100
 ```
+
+**Custom Validator Properties:**
+- **`priority` (int):** Controls execution order (default 50). Use lower values (0-20) for fast checks, 100 for slow checks.
+- **`is_chunkable` (bool):** Set to `False` if your validator requires the entire dataset at once (e.g., uniqueness checks). Default is `True`.
 
 ## Performance & Optimization
 
@@ -612,6 +628,18 @@ For maximum performance in production critical paths, you can disable validation
 ### Cached Validator Compilation
 
 Validation logic is pre-compiled at import time (when the decorator runs). The runtime overhead is minimal, consisting only of the necessary numpy/pandas checks.
+
+### Validator Execution Order (Fast-Fail)
+To optimize performance, `datawarden` sorts validators by priority to execute cheap checks before expensive ones. This ensures immediate failure for obvious issues (like wrong shape) before attempting costly scans.
+
+**Execution Phases:**
+1. **Structural Checks (Priority 0):** `Shape`, `HasColumns`, `IsDtype`, `NonEmpty`. (O(1))
+2. **Fast Holistic Checks:** Fast global checks.
+3. **Column-wise Validation:** All column-specific validators.
+4. **Slow Holistic Checks (Priority 100):** Comparison of all rows, `Rows(lambda)`, etc.
+
+**Interleaved Execution:**
+For DataFrames, validation is interleaved. Fast global checks run first, then column checks, and only if all pass, slow global checks run.
 
 ## Configuration & Memory Efficiency
 
