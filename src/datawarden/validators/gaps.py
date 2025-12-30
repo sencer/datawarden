@@ -60,6 +60,11 @@ class NoTimeGaps(Validator[pd.Series | pd.Index]):
   def __repr__(self) -> str:
     return f"NoTimeGaps({self.freq!r})"
 
+  @property
+  @override
+  def priority(self) -> int:
+    return 20
+
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
     dt_array = _get_datetime_array(data)
@@ -128,6 +133,11 @@ class MaxGap(Validator[pd.Series | pd.Index]):
   def __repr__(self) -> str:
     return f"MaxGap({self.max_gap!r})"
 
+  @property
+  @override
+  def priority(self) -> int:
+    return 20
+
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
     dt_array = _get_datetime_array(data)
@@ -185,6 +195,11 @@ class MaxDiff(Validator[pd.Series]):
     # Price changes must be at most 10 (ignores NaNs)
     data: Validated[pd.Series, IgnoringNaNs(MaxDiff(10.0))]
   """
+
+  @property
+  @override
+  def priority(self) -> int:
+    return 20
 
   def __init__(self, max_diff: float | int, ignore_nan: bool = False) -> None:
     super().__init__()

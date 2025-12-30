@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from datawarden import Validated, validate
+from datawarden import Validated, Validator, validate
 from datawarden.config import overrides
 from datawarden.validators import (
   AllowInf,
@@ -176,3 +176,82 @@ def test_stateful_gaps_chunking():
     pytest.raises(ValueError, match="Time gap exceeds maximum"),
   ):
     process(s_broken)
+
+
+# -----------------------------------------------------------------------------
+# Coverage Gap Tests (Fast vs Slow vs Chunkable)
+# -----------------------------------------------------------------------------
+
+
+class FastChunkable(Validator[pd.DataFrame]):
+  @property
+  def priority(self) -> int:
+    return 10
+
+  @property
+  def is_chunkable(self) -> bool:
+    return True
+
+  def validate(self, data):
+    pass
+
+
+class FastNonChunkable(Validator[pd.DataFrame]):
+  @property
+  def priority(self) -> int:
+    return 10
+
+  @property
+  def is_chunkable(self) -> bool:
+    return False
+
+  def validate(self, data):
+    pass
+
+
+class SlowChunkable(Validator[pd.DataFrame]):
+  @property
+  def priority(self) -> int:
+    return 100
+
+  @property
+  def is_chunkable(self) -> bool:
+    return True
+
+  def validate(self, data):
+    pass
+
+
+class SlowNonChunkable(Validator[pd.DataFrame]):
+  @property
+  def priority(self) -> int:
+    return 100
+
+  @property
+  def is_chunkable(self) -> bool:
+    return False
+
+  def validate(self, data):
+    pass
+
+
+def test_coverage_fast_slow_chunking():
+  """Test fast/slow x chunkable/non-chunkable validator execution paths."""
+
+  @validate
+  def process(
+    df: Validated[
+      pd.DataFrame, FastChunkable, FastNonChunkable, SlowChunkable, SlowNonChunkable
+    ],
+  ):
+    pass
+
+  df = pd.DataFrame({"a": range(20)})
+
+  # This will trigger 4 distinct execution paths in decorator.py:
+  # 1. Fast loop -> mode="non-chunkable" -> FastNonChunkable runs
+  # 2. Fast loop -> mode="chunkable" -> FastChunkable runs
+  # 3. Slow loop -> mode="non-chunkable" -> SlowNonChunkable runs
+  # 4. Slow loop -> mode="chunkable" -> SlowChunkable runs
+  with overrides(chunk_size_rows=5):
+    process(df)

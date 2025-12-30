@@ -174,6 +174,12 @@ class ValidationPlanBuilder:
           f"Validation conflict for column '{col}' in parameter '{param_name}': {e}"
         ) from e
 
+    # Sort all validator lists by priority
+    holistic.sort(key=lambda v: v.priority)  # pyright: ignore[reportUnknownLambdaType]
+    resolved_globals.sort(key=lambda v: v.priority)  # pyright: ignore[reportUnknownLambdaType]
+    for col_validators in resolved_columns.values():
+      col_validators.sort(key=lambda v: v.priority)  # pyright: ignore[reportUnknownLambdaType]
+
     return {
       "holistic": holistic,
       "columns": resolved_columns,

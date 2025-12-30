@@ -69,7 +69,14 @@ class MonoUp(Validator[pd.Series | pd.Index]):
 
   Use with Index(MonoUp) to apply to Series/DataFrame index.
   Can be applied directly to pd.Index or pd.Series values.
+
+  Priority: 20 (Complex Vectorized).
   """
+
+  @property
+  @override
+  def priority(self) -> int:
+    return 20
 
   def __init__(self) -> None:
     super().__init__()
@@ -112,7 +119,14 @@ class MonoDown(Validator[pd.Series | pd.Index]):
 
   Use with Index(MonoDown) to apply to Series/DataFrame index.
   Can be applied directly to pd.Index or pd.Series values.
+
+  Priority: 20 (Complex Vectorized).
   """
+
+  @property
+  @override
+  def priority(self) -> int:
+    return 20
 
   def __init__(self) -> None:
     super().__init__()
@@ -157,7 +171,14 @@ class Index(Validator[pd.Series | pd.DataFrame | pd.Index]):
   - Index(Datetime) - Check index is DatetimeIndex
   - Index(MonoUp) - Check index is monotonically increasing
   - Index(Datetime, MonoUp) - Check both
+
+  Priority: 20 (Complex Vectorized) - Runs after simple checks but before slow holistic checks.
   """
+
+  @property
+  @override
+  def priority(self) -> int:
+    return 20
 
   def __init__(
     self,

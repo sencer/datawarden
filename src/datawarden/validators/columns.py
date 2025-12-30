@@ -18,6 +18,11 @@ class IsDtype(Validator[pd.Series | pd.DataFrame]):
     super().__init__()
     self.dtype = np.dtype(dtype)
 
+  @property
+  @override
+  def priority(self) -> int:
+    return 0
+
   @override
   def validate(self, data: pd.Series | pd.DataFrame) -> None:
     if isinstance(data, pd.Series):
@@ -54,6 +59,11 @@ class HasColumns(Validator[pd.DataFrame]):
       if v:
         instantiated.append(v)
     self.validators = tuple(instantiated)
+
+  @property
+  @override
+  def priority(self) -> int:
+    return 0
 
   @property
   @override

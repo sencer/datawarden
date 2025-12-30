@@ -58,10 +58,18 @@ class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
     """Return a copy of this validator that ignores NaN values."""
     return self.__class__(*self.targets, ignore_nan=True)
 
+  @property
+  @override
+  def priority(self) -> int:
+    return 10
+
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     # Check for NaN values before comparison
-    if not self.ignore_nan and np.any(mask_nan := pd.isna(data.values)):  # pyright: ignore
+    # Access .values once
+    vals = data if isinstance(data, pd.Index) else data.values
+
+    if not self.ignore_nan and np.any(mask_nan := pd.isna(vals)):  # pyright: ignore
       report_failures(
         data,
         mask_nan,  # pyright: ignore

@@ -174,21 +174,31 @@ class Finite(Validator[pd.Series | pd.DataFrame | pd.Index]):
     Validated[pd.Series, Finite, NonNaN]   # No Inf, no NaN
   """
 
+  @property
+  @override
+  def priority(self) -> int:
+    return 10
+
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     _require_pandas(data, "Finite")
-    numeric_data = (
-      data.select_dtypes(include=[np.number])
-      if isinstance(data, pd.DataFrame)
-      else data
-    )
+    # Access .values for speed if it's a pandas object
+    vals = data.values if isinstance(data, (pd.Series, pd.DataFrame)) else data
+
     # Check if data is numeric before checking for inf
     if (
       (isinstance(data, pd.DataFrame) or pd.api.types.is_numeric_dtype(data))
-      and len(numeric_data) > 0
-      and np.any(mask := np.isinf(numeric_data))
+      and len(data) > 0  # Use len(data) instead of len(numeric_data) for initial check
+      and np.any(mask := np.isinf(vals))
     ):
-      report_failures(numeric_data, mask, "Data must be finite (contains Inf)")
+      # Only do heavy filtering if we actually found something
+      numeric_data = (
+        data.select_dtypes(include=[np.number])
+        if isinstance(data, pd.DataFrame)
+        else data
+      )
+      if np.any(mask := np.isinf(numeric_data.values)):  # Re-check on numeric only
+        report_failures(numeric_data, mask, "Data must be finite (contains Inf)")
 
 
 class StrictFinite(Validator[pd.Series | pd.DataFrame | pd.Index]):
@@ -200,27 +210,49 @@ class StrictFinite(Validator[pd.Series | pd.DataFrame | pd.Index]):
   Use Finite alone if you want to allow NaN values.
   """
 
+  @property
+  @override
+  def priority(self) -> int:
+    return 10
+
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     _require_pandas(data, "StrictFinite")
+
+    # Access .values for speed
+    vals = data.values if isinstance(data, (pd.Series, pd.DataFrame)) else data
+
     # Use np.isfinite() for atomic check of both NaN and Inf
-    numeric_data = (
-      data.select_dtypes(include=[np.number])
-      if isinstance(data, pd.DataFrame)
-      else data
-    )
-    if (
-      (isinstance(data, pd.DataFrame) or pd.api.types.is_numeric_dtype(data))
-      and len(numeric_data) > 0
-      and not np.all(np.isfinite(numeric_data))
-    ):
-      # Create mask for reporting - ~np.isfinite covers both NaN and Inf
-      mask = ~np.isfinite(numeric_data)
-      report_failures(numeric_data, mask, "Data must be finite (contains NaN or Inf)")
+    # Check if we have any non-finite values FIRST before more expensive checks
+    if len(data) > 0 and not np.all(np.isfinite(vals)):
+      # Possible violation, now do careful numeric check
+      numeric_data = (
+        data.select_dtypes(include=[np.number])
+        if isinstance(data, pd.DataFrame)
+        else data
+      )
+      if (
+        isinstance(data, pd.DataFrame) or pd.api.types.is_numeric_dtype(data)
+      ) and len(numeric_data) > 0:
+        vals_numeric = numeric_data.values
+        if not np.all(np.isfinite(vals_numeric)):
+          # Create mask for reporting - ~np.isfinite covers both NaN and Inf
+          mask = ~np.isfinite(vals_numeric)
+          report_failures(
+            numeric_data, mask, "Data must be finite (contains NaN or Inf)"
+          )
 
 
 class NonEmpty(Validator[pd.Series | pd.DataFrame | pd.Index]):
-  """Validator for non-empty data."""
+  """Validator for non-empty data.
+
+  Priority: 0 (Structural).
+  """
+
+  @property
+  @override
+  def priority(self) -> int:
+    return 0
 
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
@@ -235,11 +267,17 @@ class NonNaN(Validator[pd.Series | pd.DataFrame | pd.Index]):
   Uses pd.isna() for compatibility with all dtypes including object columns.
   """
 
+  @property
+  @override
+  def priority(self) -> int:
+    return 10
+
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     _require_pandas(data, "NonNaN")
-    if scalar_any(data.isna()):
-      mask = data.isna()
+    vals = data if isinstance(data, pd.Index) else data.values
+    if scalar_any(pd.isna(vals)):
+      mask = pd.isna(data)  # Keep mask as pandas obj for reporting
       report_failures(data, mask, "Data must not contain NaN values")
 
 
@@ -249,6 +287,11 @@ class NonNegative(Validator[pd.Series | pd.DataFrame | pd.Index]):
   Rejects NaN values by default. Use IgnoringNaNs(NonNegative()) to allow NaN.
   """
 
+  @property
+  @override
+  def priority(self) -> int:
+    return 10
+
   def __init__(self, ignore_nan: bool = False) -> None:
     super().__init__()
     self.ignore_nan = ignore_nan
@@ -256,15 +299,18 @@ class NonNegative(Validator[pd.Series | pd.DataFrame | pd.Index]):
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     _require_pandas(data, "NonNegative")
+    # Access values once
+    vals = data if isinstance(data, pd.Index) else data.values
+
     # Check for NaN values first (consistent with comparison validators)
-    if not self.ignore_nan and scalar_any(mask_nan := data.isna()):
+    if not self.ignore_nan and scalar_any(mask_nan := pd.isna(vals)):
       report_failures(
         data,
         mask_nan,
         "Cannot validate non-negative with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
       )
-    if scalar_any(data < 0):
-      mask = data < 0
+    if scalar_any(vals < 0):
+      mask = vals < 0
       report_failures(data, mask, "Data must be non-negative")
 
 
@@ -274,6 +320,11 @@ class Positive(Validator[pd.Series | pd.DataFrame | pd.Index]):
   Rejects NaN values by default. Use IgnoringNaNs(Positive()) to allow NaN.
   """
 
+  @property
+  @override
+  def priority(self) -> int:
+    return 10
+
   def __init__(self, ignore_nan: bool = False) -> None:
     super().__init__()
     self.ignore_nan = ignore_nan
@@ -281,15 +332,17 @@ class Positive(Validator[pd.Series | pd.DataFrame | pd.Index]):
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     _require_pandas(data, "Positive")
+    vals = data if isinstance(data, pd.Index) else data.values
+
     # Check for NaN values first (consistent with comparison validators)
-    if not self.ignore_nan and scalar_any(mask_nan := data.isna()):
+    if not self.ignore_nan and scalar_any(mask_nan := pd.isna(vals)):
       report_failures(
         data,
         mask_nan,
         "Cannot validate positive with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
       )
-    if scalar_any(data <= 0):
-      mask = data <= 0
+    if scalar_any(vals <= 0):
+      mask = vals <= 0
       report_failures(data, mask, "Data must be positive")
 
 
@@ -299,6 +352,11 @@ class Negative(Validator[pd.Series | pd.DataFrame | pd.Index]):
   Rejects NaN values by default. Use IgnoringNaNs(Negative()) to allow NaN.
   """
 
+  @property
+  @override
+  def priority(self) -> int:
+    return 10
+
   def __init__(self, ignore_nan: bool = False) -> None:
     super().__init__()
     self.ignore_nan = ignore_nan
@@ -306,15 +364,17 @@ class Negative(Validator[pd.Series | pd.DataFrame | pd.Index]):
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     _require_pandas(data, "Negative")
+    vals = data if isinstance(data, pd.Index) else data.values
+
     # Check for NaN values first (consistent with comparison validators)
-    if not self.ignore_nan and scalar_any(mask_nan := data.isna()):
+    if not self.ignore_nan and scalar_any(mask_nan := pd.isna(vals)):
       report_failures(
         data,
         mask_nan,
         "Cannot validate negative with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
       )
-    if scalar_any(data >= 0):
-      mask = data >= 0
+    if scalar_any(vals >= 0):
+      mask = vals >= 0
       report_failures(data, mask, "Data must be negative")
 
 
@@ -324,6 +384,11 @@ class NonPositive(Validator[pd.Series | pd.DataFrame | pd.Index]):
   Rejects NaN values by default. Use IgnoringNaNs(NonPositive()) to allow NaN.
   """
 
+  @property
+  @override
+  def priority(self) -> int:
+    return 10
+
   def __init__(self, ignore_nan: bool = False) -> None:
     super().__init__()
     self.ignore_nan = ignore_nan
@@ -331,15 +396,17 @@ class NonPositive(Validator[pd.Series | pd.DataFrame | pd.Index]):
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     _require_pandas(data, "NonPositive")
+    vals = data if isinstance(data, pd.Index) else data.values
+
     # Check for NaN values first (consistent with comparison validators)
-    if not self.ignore_nan and scalar_any(mask_nan := data.isna()):
+    if not self.ignore_nan and scalar_any(mask_nan := pd.isna(vals)):
       report_failures(
         data,
         mask_nan,
         "Cannot validate non-positive with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
       )
-    if scalar_any(data > 0):
-      mask = data > 0
+    if scalar_any(vals > 0):
+      mask = vals > 0
       report_failures(data, mask, "Data must be non-positive")
 
 
@@ -361,6 +428,11 @@ class Between(Validator[pd.Series | pd.DataFrame | pd.Index]):
     # Values must be in (0, 1] (exclusive lower, inclusive upper)
     data: Validated[pd.Series, Between(0, 1, inclusive=(False, True))]
   """
+
+  @property
+  @override
+  def priority(self) -> int:
+    return 10
 
   def __init__(
     self,
@@ -387,8 +459,10 @@ class Between(Validator[pd.Series | pd.DataFrame | pd.Index]):
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
     _require_pandas(data, "Between")
+    vals = data if isinstance(data, pd.Index) else data.values
+
     # Check for NaN values first
-    if not self.ignore_nan and scalar_any(mask_nan := data.isna()):
+    if not self.ignore_nan and scalar_any(mask_nan := pd.isna(vals)):
       report_failures(
         data,
         mask_nan,
@@ -396,20 +470,20 @@ class Between(Validator[pd.Series | pd.DataFrame | pd.Index]):
       )
     # Check lower bound
     if self.lower_inclusive:
-      if scalar_any(data < self.lower):
-        mask = data < self.lower
+      if scalar_any(vals < self.lower):
+        mask = vals < self.lower
         report_failures(data, mask, f"Data must be >= {self.lower}")
-    elif scalar_any(data <= self.lower):
-      mask = data <= self.lower
+    elif scalar_any(vals <= self.lower):
+      mask = vals <= self.lower
       report_failures(data, mask, f"Data must be > {self.lower}")
 
     # Check upper bound
     if self.upper_inclusive:
-      if scalar_any(data > self.upper):
-        mask = data > self.upper
+      if scalar_any(vals > self.upper):
+        mask = vals > self.upper
         report_failures(data, mask, f"Data must be <= {self.upper}")
-    elif scalar_any(data >= self.upper):
-      mask = data >= self.upper
+    elif scalar_any(vals >= self.upper):
+      mask = vals >= self.upper
       report_failures(data, mask, f"Data must be < {self.upper}")
 
 
@@ -511,12 +585,16 @@ class Rows(Validator[pd.DataFrame]):
     # ❌ SLOW: Row-wise (Python loop)
     # Rows(lambda row: row["a"] + row["b"] == row["c"])
 
-    # ✅ FAST: Vectorized (Numpy/Pandas)
-    # Is(lambda df: df["a"] + df["b"] == df["c"])
-
     Note: The vectorized version using Is() is much faster as it avoids
     Python-level row iteration.
+
+  Priority: 100 (Slow) - Validated last, only if all other validators pass.
   """
+
+  @property
+  @override
+  def priority(self) -> int:
+    return 100
 
   def __init__(
     self,
@@ -580,6 +658,11 @@ class OneOf(Validator[pd.Series | pd.Index]):
     args = ", ".join(repr(a) for a in sorted(self.allowed, key=str))
     return f"OneOf({args})"
 
+  @property
+  @override
+  def priority(self) -> int:
+    return 10
+
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
     if isinstance(data, pd.Index):
@@ -591,7 +674,16 @@ class OneOf(Validator[pd.Series | pd.Index]):
     else:
       # isinstance(data, pd.Series) implied
       # Vectorized check using isin() - much faster for large series
-      mask = ~data.isin(self.allowed) & data.notna()
+      # We just operate on the series directly for isin, it's already optimized
+      # But we should check notna on values or similarly optimized path
+      # Note: pd.unique on series is fast, logic as is might be fine but let's see
+
+      # isin on numpy array can be faster or slower depending on dtypes.
+      # Pandas .isin is usually quite optimized. Retain Series.isin but check notna via np potentially
+      # Actually, let's keep it simple and just use values for notna check if we were doing it manually
+      # But here we do data.isin(self.allowed).
+
+      mask = ~data.isin(self.allowed) & pd.notna(data)
       if mask.any():
         invalid = set(pd.unique(data[mask]))
         report_failures(
@@ -664,12 +756,19 @@ class Shape(Validator[pd.Series | pd.DataFrame | pd.Index]):
   - Shape(100) - For Series: exactly 100 rows
 
   For Series, only the first dimension (rows) is checked.
+
+  Priority: 0 (Structural) - Validated first before any content checks.
   """
 
   @property
   @override
   def is_chunkable(self) -> bool:
     return False
+
+  @property
+  @override
+  def priority(self) -> int:
+    return 0
 
   def __init__(
     self,

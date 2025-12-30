@@ -29,6 +29,18 @@ class Validator[T]:
     """
     return True
 
+  @property
+  def priority(self) -> int:
+    """Execution priority (lower runs earlier).
+
+    0: Structural (Shape, Columns) - O(1)
+    10: Vectorized (Finite, NonNaN, Comparison) - O(N) numpy
+    20: Vectorized Complex (Monotonicity, Index) - O(N) but slower
+    50: Default/Unknown
+    100: Slow (Rows, Python loops) - O(N) python
+    """
+    return 50
+
   def reset(self) -> None:
     """Reset validator state for new validation run.
 

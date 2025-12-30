@@ -120,32 +120,40 @@ def is_pandas_type(annotated_type: object) -> bool:
   return False
 
 
-def scalar_any(data: pd.Series | pd.DataFrame | pd.Index | np.ndarray) -> bool:
+def scalar_any(
+  data: pd.Series | pd.DataFrame | pd.Index | np.ndarray | bool | np.bool_,
+) -> bool:
   """Check if any value is True across Series, DataFrame, Index, or Array.
 
   Handles axis=None for DataFrames and standard .any() for others.
   """
   if isinstance(data, pd.DataFrame):
-    return bool(data.any(axis=None))
-  if isinstance(data, (pd.Series, pd.Index, np.ndarray)):
-    return bool(np.any(data))
+    return bool(data.values.any())
+  if isinstance(data, pd.Series):
+    # Use pandas .any() for compatibility with ExtensionArrays (e.g. Categorical)
+    return bool(data.any())
+  if isinstance(data, pd.Index):
+    return bool(data.to_numpy().any())
+  if isinstance(data, np.ndarray):
+    return bool(data.any())
   return bool(data)
 
 
 def report_failures(
   data: pd.Series | pd.DataFrame | pd.Index,
-  mask: pd.Series | pd.DataFrame | pd.Index | np.ndarray,
+  mask: pd.Series | pd.DataFrame | pd.Index | np.ndarray | bool | np.bool_,
   msg: str,
 ) -> None:
   """Report validation failures with context."""
   # Calculate number of failures
-  n_failed = (
-    mask.sum().sum()
-    if isinstance(mask, pd.DataFrame)
-    else int(np.sum(mask))
-    if isinstance(mask, (pd.Index, np.ndarray))
-    else mask.sum()
-  )
+  if isinstance(mask, (bool, np.bool_)):
+    n_failed = 1 if mask else 0
+  elif isinstance(mask, pd.DataFrame):
+    n_failed = mask.sum().sum()
+  elif isinstance(mask, (pd.Index, np.ndarray)):
+    n_failed = int(np.sum(mask))
+  else:
+    n_failed = mask.sum()
 
   if n_failed == 0:
     return
