@@ -56,9 +56,11 @@ def overrides(**kwargs: Any) -> Iterator[None]:
   - Enabling memory-efficient chunking (chunk_size_rows=10000)
 
   Example:
+    ```python
     # Process large file in chunks without blocking UI
     with overrides(chunk_size_rows=50_000):
       process_large_dataset(df)
+    ```
   """
   original = {}
   for key, value in kwargs.items():

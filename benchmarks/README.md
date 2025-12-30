@@ -43,20 +43,24 @@ The optimization avoids `signature.bind()` when `skip_validation=True` by:
 def wrapper(*args, **kwargs):
     # (Simplified example of the fast path)
     skip = kwargs.get("skip_validation", False)
-    
+
     if not skip:
         # Only bind args when we need to validate
         sig = inspect.signature(func)
         bound_args = sig.bind(*args, **kwargs)
         # ... validate ...
         return func(*bound_args.args, **bound_args.kwargs)
-    
+
     # Fast path: direct call
     return func(*args, **kwargs)
 ```
 
-### Running the Benchmark
+### Running the Benchmarks
 
 ```bash
+# Run decorator overhead benchmark
 uv run python benchmarks/benchmark_decorator.py
+
+# Run data scaling benchmark
+uv run python benchmarks/bench_scaling.py
 ```

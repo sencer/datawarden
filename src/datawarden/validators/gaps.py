@@ -37,11 +37,13 @@ class NoTimeGaps(Validator[pd.Series | pd.Index]):
   - pd.DatetimeIndex (validates index, use with Index(NoTimeGaps(...)))
 
   Example:
+    ```python
     # Validate datetime column values
     data: Validated[pd.Series, NoTimeGaps("1min")]
 
     # Validate index via Index wrapper
     data: Validated[pd.DataFrame, Index(NoTimeGaps("1min"))]
+    ```
   """
 
   def __init__(self, freq: str) -> None:
@@ -110,11 +112,13 @@ class MaxGap(Validator[pd.Series | pd.Index]):
   - pd.DatetimeIndex (validates index, use with Index(MaxGap(...)))
 
   Example:
+    ```python
     # Allow up to 2-minute gaps in 1-minute data (tolerates 1 missing row)
     data: Validated[pd.Series, MaxGap("2min")]
 
     # Validate index via Index wrapper
     data: Validated[pd.DataFrame, Index(MaxGap("5min"))]
+    ```
   """
 
   def __init__(self, max_gap: str) -> None:
@@ -189,11 +193,13 @@ class MaxDiff(Validator[pd.Series]):
   Useful for validating that numeric data doesn't have large jumps.
 
   Example:
+    ```python
     # Price changes must be at most 10 (fails on NaNs)
     data: Validated[pd.Series, MaxDiff(10.0)]
 
     # Price changes must be at most 10 (ignores NaNs)
     data: Validated[pd.Series, IgnoringNaNs(MaxDiff(10.0))]
+    ```
   """
 
   @property

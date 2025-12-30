@@ -125,11 +125,13 @@ class Ge(_ComparisonValidator):
     Ge("a", "b", "c") means a >= b >= c for all rows
 
   Examples:
+    ```python
     # Series: all values >= 0
     data: Validated[pd.Series, Ge(0)]
 
     # DataFrame: ensure high >= low
     data: Validated[pd.DataFrame, Ge("high", "low")]
+    ```
 
   Note:
     Rejects NaN values by default. Use IgnoringNaNs(Ge(...)) to skip NaN.
@@ -152,11 +154,13 @@ class Le(_ComparisonValidator):
     Le("low", "high") means low <= high for all rows
 
   Examples:
+    ```python
     # Series: all values <= 100
     data: Validated[pd.Series, Le(100)]
 
     # DataFrame: ensure low <= mid <= high
     data: Validated[pd.DataFrame, Le("low", "mid", "high")]
+    ```
 
   Note:
     Rejects NaN values by default. Use IgnoringNaNs(Le(...)) to skip NaN.
@@ -179,11 +183,13 @@ class Gt(_ComparisonValidator):
     Gt("high", "low") means high > low for all rows (strict inequality)
 
   Examples:
+    ```python
     # Series: all values > 0
     data: Validated[pd.Series, Gt(0)]
 
     # DataFrame columns strictly ordered
     data: Validated[pd.DataFrame, Gt("high", "low")]
+    ```
 
   Note:
     Rejects NaN values by default. Use IgnoringNaNs(Gt(...)) to skip NaN.
@@ -206,11 +212,13 @@ class Lt(_ComparisonValidator):
     Lt("low", "high") means low < high for all rows (strict inequality)
 
   Examples:
+    ```python
     # Series: all values < 100
     data: Validated[pd.Series, Lt(100)]
 
     # DataFrame columns strictly ordered
     data: Validated[pd.DataFrame, Lt("low", "high")]
+    ```
 
   Note:
     Rejects NaN values by default. Use IgnoringNaNs(Lt(...)) to skip NaN.

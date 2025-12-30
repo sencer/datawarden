@@ -42,7 +42,9 @@ class HasColumns(Validator[pd.DataFrame]):
   """Validator for presence of specific columns in DataFrame.
 
   Can also apply validators to the specified columns:
+  ```python
   HasColumns(["a", "b"], Finite, Positive)
+  ```
   """
 
   def __init__(
@@ -94,7 +96,9 @@ class HasColumn(Validator[pd.DataFrame]):
   """Wrapper to apply validators to specific DataFrame columns.
 
   Example:
+  ```python
   HasColumn("my_col", Positive)
+  ```
   """
 
   def __init__(
