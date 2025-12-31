@@ -557,7 +557,7 @@ class TestOptInStrictness:
     assert process(pd.Series([1, 2, 3])) == 6.0
 
     # NaN data fails
-    with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
+    with pytest.raises(ValueError, match="Data must not contain NaN"):
       process(pd.Series([1, np.nan, 3]))
 
   def test_explicit_non_empty(self):
@@ -606,7 +606,7 @@ class TestOptInStrictness:
       return len(data)
 
     # NaN fails
-    with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
+    with pytest.raises(ValueError, match="Data must not contain NaN"):
       process(pd.DataFrame({"a": [1, np.nan]}))
 
     # Empty fails
@@ -638,7 +638,7 @@ class TestOptInStrictness:
       "strict": [1, np.nan, 3],
       "lax": [1, 2, 3],
     })
-    with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
+    with pytest.raises(ValueError, match="Data must not contain NaN"):
       process(df_fail)
 
 

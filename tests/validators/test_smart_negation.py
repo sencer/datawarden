@@ -10,8 +10,6 @@ from datawarden import (
   Le,
   Lt,
   Negative,
-  NonNegative,
-  NonPositive,
   Not,
   Positive,
   Validated,
@@ -24,28 +22,18 @@ class TestSmartNegation:
   """Tests for smart negation via negate() methods."""
 
   def test_not_positive_uses_smart_negation(self):
-    """Test that Not(Positive) uses NonPositive via smart negation."""
+    """Test that Not(Positive) uses Le(0) via smart negation."""
     v = Not(Positive())
     assert v._using_smart_negation
-    assert isinstance(v.wrapped, NonPositive)
+    assert isinstance(v.wrapped, Le)
+    assert v.wrapped.targets == (0,)
 
   def test_not_negative_uses_smart_negation(self):
-    """Test that Not(Negative) uses NonNegative via smart negation."""
+    """Test that Not(Negative) uses Ge(0) via smart negation."""
     v = Not(Negative())
     assert v._using_smart_negation
-    assert isinstance(v.wrapped, NonNegative)
-
-  def test_not_nonnegative_uses_smart_negation(self):
-    """Test that Not(NonNegative) uses Negative via smart negation."""
-    v = Not(NonNegative())
-    assert v._using_smart_negation
-    assert isinstance(v.wrapped, Negative)
-
-  def test_not_nonpositive_uses_smart_negation(self):
-    """Test that Not(NonPositive) uses Positive via smart negation."""
-    v = Not(NonPositive())
-    assert v._using_smart_negation
-    assert isinstance(v.wrapped, Positive)
+    assert isinstance(v.wrapped, Ge)
+    assert v.wrapped.targets == (0,)
 
 
 class TestComparisonNegation:
@@ -186,7 +174,7 @@ class TestNegationIntegration:
     assert func(pd.Series([0, -1, -5])) == -6
 
     # Invalid: positive value
-    with pytest.raises(ValueError, match="non-positive"):
+    with pytest.raises(ValueError, match="must be <= 0"):
       func(pd.Series([0, 1, -1]))
 
   def test_decorator_with_not_ge(self):

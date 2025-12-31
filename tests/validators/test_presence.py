@@ -1,4 +1,4 @@
-"""Tests for presence validators: Not(IsNaN) and NotEmpty."""
+"""Tests for presence validators: NotNaN and NotEmpty."""
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportCallIssue=false, reportAttributeAccessIssue=false
 
@@ -6,29 +6,29 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from datawarden import IsNaN, Not, NotEmpty
+from datawarden import IsNaN, Not, NotEmpty, NotNaN
 
 
-class TestNot(IsNaN):
-  """Tests for Not(IsNaN) validator."""
+class TestNotNaN:
+  """Tests for NotNaN validator."""
 
   def test_validate_with_valid_series_passes(self):
-    """Test Not(IsNaN) validator with valid Series."""
+    """Test NotNaN validator with valid Series."""
     data = pd.Series([1.0, 2.0, 3.0])
-    validator = Not(IsNaN())
+    validator = NotNaN()
     assert validator.validate(data) is None
 
   def test_validate_with_nan_values_raises_error(self):
     """Test Not(IsNaN) validator rejects NaN."""
     data = pd.Series([1.0, np.nan, 3.0])
-    validator = Not(IsNaN())
-    with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
+    validator = NotNaN()
+    with pytest.raises(ValueError, match="Data must not contain NaN"):
       validator.validate(data)
 
   def test_validate_with_inf_values_passes(self):
     """Test Not(IsNaN) validator allows Inf."""
     data = pd.Series([1.0, np.inf, 3.0])
-    validator = Not(IsNaN())
+    validator = NotNaN()
     assert validator.validate(data) is None
 
   def test_validate_with_empty_series_passes(self):

@@ -18,6 +18,8 @@ from datawarden.validators.value import (
   IgnoringNaNs,
   IsNaN,
   Negative,
+  NotEmpty,
+  NotNaN,
   OneOf,
   Positive,
   StrictFinite,
@@ -217,21 +219,22 @@ class ValidationDomain:
       domain.min_val = 0
       domain.min_inclusive = False
       domain.allows_nan = False
-    elif isinstance(v, Not):
+    elif isinstance(v, (Not, NotNaN)):
       # Handle Not Logic
-      if isinstance(v.wrapped, IsNaN):
+      wrapped = getattr(v, "wrapped", None)
+      if isinstance(v, NotNaN) or isinstance(wrapped, IsNaN):
         domain.allows_nan = False
-      elif isinstance(v.wrapped, Negative):
+      elif isinstance(wrapped, Negative):
         # Not(Negative) -> Not(<0) -> >=0 (NonNegative)
         domain.min_val = 0
         domain.min_inclusive = True
         domain.allows_nan = False
-      elif isinstance(v.wrapped, Positive):
+      elif isinstance(wrapped, Positive):
         # Not(Positive) -> Not(>0) -> <=0 (NonPositive)
         domain.max_val = 0
         domain.max_inclusive = True
         domain.allows_nan = False
-      elif isinstance(v.wrapped, Between):
+      elif isinstance(wrapped, Between):
         # Not(Between) -> Outside range.
         # ValidationDomain represents ALLOWED Single Interval.
         # Outside range is split interval (x<min OR x>max).
@@ -239,6 +242,11 @@ class ValidationDomain:
         # Domain doc: "min_val...max_val". Implies AND logic.
         # So we cannot represent Not(Between).
         pass
+    elif isinstance(v, NotEmpty):
+      # Domain logic doesn't track emptiness, but we want it recognized
+      # as a domain validator so it can be overridden if needed.
+      # For now, it doesn't affect the range/flags.
+      pass
     elif isinstance(v, Finite):
       domain.allows_inf = False
     elif isinstance(v, StrictFinite):
@@ -304,6 +312,6 @@ class ValidationDomain:
     elif not self.allows_inf:
       vals.append(StrictFinite())
     else:
-      vals.append(Not(IsNaN()))
+      vals.append(NotNaN())
 
     return vals
