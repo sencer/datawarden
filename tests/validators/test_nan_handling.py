@@ -13,12 +13,14 @@ from datawarden import (
   IgnoringNaNs,
   Index,
   Is,
+  IsNaN,
   Le,
   Lt,
   MonoUp,
   Negative,
   Not,
   Positive,
+  Rows,
   Shape,
   validate,
 )
@@ -64,6 +66,10 @@ class TestIgnoringNaNsWrapper:
 
     v.reset()
     assert mono._last_val is None, "MonoUp was not reset via IgnoringNaNs"
+
+
+class TestIgnoringNaNsMarkers:
+  """Test IgnoringNaNs in marker mode."""
 
   def test_marker_mode_basic(self):
     """Test that IgnoringNaNs() marker wraps all validators."""
@@ -242,6 +248,25 @@ class TestIgnoringNaNsWrapper:
     # Index with NaT
     idx = pd.to_datetime(["2024-01-01", "NaT", "2024-01-03"])
     assert validator.validate(idx) is None
+
+  def test_ignoring_nans_wrapping_rows(self):
+    """IgnoringNaNs should handle wrapping holistic validators like Rows without crashing."""
+    # Rows validator requires a DataFrame.
+    # Currently IgnoringNaNs iterates columns and passes Series to wrapped validator.
+    v = IgnoringNaNs(Rows(lambda row: row.sum() > 0))
+    df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+    # This should pass without TypeError: Rows validator requires a pandas DataFrame
+    v.validate(df)
+
+  def test_non_nan_on_non_numeric(self):
+    """Not(IsNaN) should work correctly on non-numeric data."""
+    v = Not(IsNaN())
+    s = pd.Series(["a", None, "c"])
+    with pytest.raises(ValueError, match="Data must not contain NaN"):
+      v.validate(s)
+
+    s_valid = pd.Series(["a", "b", "c"])
+    assert v.validate(s_valid) is None
 
 
 class TestComparisonNaNHandling:
