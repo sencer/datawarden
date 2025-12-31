@@ -1,3 +1,8 @@
+from typing import Any
+
+import pytest
+
+from datawarden.base import CompoundValidator, Validator
 from datawarden.domain import ValidationDomain
 
 
@@ -110,3 +115,25 @@ class TestValidationDomain:
     d2 = ValidationDomain()
     assert d1.is_subset(d2)  # {1} is subset of Any
     assert not d2.is_subset(d1)  # Any is not subset of {1}
+
+  def test_compound_validator_fallback(self):
+    class FlakyVectorized(Validator[Any]):
+      priority = 10
+
+      def validate_vectorized(self, data):
+        # Claim to support it but fail
+        raise NotImplementedError("Oops")
+
+      def validate(self, data):
+        # Fallback should call this
+        if data == "fail":
+          raise ValueError("Failed in fallback")
+
+    # But we can instantiate CompoundValidator directly.
+    v = CompoundValidator([FlakyVectorized()])
+
+    # Should fall back to validate()
+    v.validate("ok")  # Should pass
+
+    with pytest.raises(ValueError, match="Failed in fallback"):
+      v.validate("fail")

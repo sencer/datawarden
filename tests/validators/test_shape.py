@@ -127,3 +127,22 @@ class TestShape:
     # we inspect the internal object manually to ensure it works.
     v = Shape(Any)
     assert v.rows.describe() == "any"
+
+  def test_shape_validator_failures(self):
+    s_rows = Shape(5)
+    with pytest.raises(ValueError, match="must have == 5 rows"):
+      s_rows.validate(pd.Series([1, 2]))
+
+    s_df = Shape(5, 2)
+    with pytest.raises(ValueError, match="must have == 5 rows"):
+      s_df.validate(pd.DataFrame({"a": [1]}, index=[0]))
+
+    with pytest.raises(ValueError, match="must have == 2 columns"):
+      s_df.validate(pd.DataFrame({"a": [1, 2, 3, 4, 5]}))
+
+  def test_shape_invalid_constraint(self):
+    with pytest.raises(TypeError, match="Invalid shape constraint"):
+      Shape("bad")
+
+    with pytest.raises(TypeError, match="Invalid shape constraint"):
+      Shape(10, "bad")

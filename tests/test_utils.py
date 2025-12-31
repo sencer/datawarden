@@ -7,6 +7,7 @@ import pytest
 from datawarden import utils
 from datawarden.base import Validator
 from datawarden.utils import instantiate_validator, is_pandas_type, report_failures
+from datawarden.validators.value import _get_numeric_df_values  # noqa: PLC2701
 
 
 class GoodValidator(Validator):
@@ -143,3 +144,14 @@ def test_report_failures_exception_fallback():
 
   with pytest.raises(ValueError, match=r"\(unknown indices\)"):
     report_failures(data_dummy, mask_dummy, "Failure msg")  # type: ignore
+
+
+def test_get_numeric_df_values_no_numeric():
+
+  df = pd.DataFrame({"a": ["s", "t"], "b": [True, False]})
+
+  vals, data = _get_numeric_df_values(df)
+
+  assert vals is None
+
+  assert data is None

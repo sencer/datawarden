@@ -157,3 +157,46 @@ class TestNotPositive:
     validator = Not(Positive())
     with pytest.raises(ValueError, match="Cannot perform <= comparison with NaN"):
       validator.validate(data)
+
+
+def test_positive_negative_edge_cases():
+  v = Positive()
+  # Non-numeric series
+  with pytest.raises(TypeError, match="Positive requires numeric data"):
+    v.validate(pd.Series(["a"]))
+
+  # No numeric columns DF
+  df_str = pd.DataFrame({"a": ["a"]})
+  v.validate(df_str)  # Should return early (no op)
+
+  # Non-pandas
+  with pytest.raises(ValueError):
+    v.validate(-1)
+  v.validate(1)
+
+  # validate_vectorized non-numeric
+  assert v.validate_vectorized(pd.Series(["a"])).all()
+
+  v_neg = Negative()
+  # Non-numeric series
+  with pytest.raises(TypeError, match="Negative requires numeric data"):
+    v_neg.validate(pd.Series(["a"]))
+
+  # Non-pandas
+  with pytest.raises(ValueError):
+    v_neg.validate(1)
+  v_neg.validate(-1)
+
+  assert v_neg.validate_vectorized(pd.Series(["a"])).all()
+
+
+def test_positive_failure_pandas():
+  v = Positive()
+  with pytest.raises(ValueError, match="Data must be positive"):
+    v.validate(pd.Series([-1, 1]))
+
+
+def test_negative_failure_pandas():
+  v = Negative()
+  with pytest.raises(ValueError, match="Data must be negative"):
+    v.validate(pd.Series([1, -1]))

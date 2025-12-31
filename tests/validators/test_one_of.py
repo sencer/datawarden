@@ -81,3 +81,8 @@ class TestOneOf:
     data = pd.Series(["a", "b"])
     validator = OneOf("a", "b", "c")
     assert validator.validate(data) is None
+
+  def test_oneof_failure_pandas(self):
+    v = OneOf(1, 2)
+    with pytest.raises(ValueError, match="Values must be one of"):
+      v.validate(pd.Series([3]))

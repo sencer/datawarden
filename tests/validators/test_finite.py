@@ -120,3 +120,18 @@ class TestStrictFinite:
     v = StrictFinite()
     df = pd.DataFrame({"a": [1.0, 2.0], "b": ["x", "y"]})
     v.validate(df)
+
+  def test_finite_strict_finite_type_errors(self):
+    v = Finite()
+    with pytest.raises(TypeError, match="Finite requires numeric data"):
+      v.validate(pd.Series(["a", "b"]))
+
+    with pytest.raises(TypeError, match="Finite requires numeric data"):
+      v.validate(pd.Index(["a", "b"]))
+
+    with pytest.raises(TypeError, match="Finite requires pandas"):
+      v.validate([1, 2])
+
+    v2 = StrictFinite()
+    with pytest.raises(TypeError, match="StrictFinite requires numeric data"):
+      v2.validate(pd.Series(["a", "b"]))

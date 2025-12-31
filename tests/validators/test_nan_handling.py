@@ -7,9 +7,12 @@ import pandas as pd
 import pytest
 
 from datawarden import (
+  AllowInf,
+  AllowNaN,
   Datetime,
   Finite,
   Ge,
+  HasColumn,
   IgnoringNaNs,
   Index,
   Is,
@@ -24,6 +27,7 @@ from datawarden import (
   Shape,
   validate,
 )
+from datawarden.base import Validator
 
 
 class TestIgnoringNaNsWrapper:
@@ -223,8 +227,6 @@ class TestIgnoringNaNsMarkers:
     validator = IgnoringNaNs(Ge(0))
     # pd.Index with NaN values
     idx = pd.Index([1.0, np.nan, 2.0, np.nan, 3.0])
-    # pd.Index with NaN values
-    idx = pd.Index([1.0, np.nan, 2.0, np.nan, 3.0])
     assert validator.validate(idx) is None
 
   def test_with_index_invalid(self):
@@ -236,8 +238,6 @@ class TestIgnoringNaNsMarkers:
 
   def test_with_index_all_nan(self):
     """Test IgnoringNaNs with all-NaN Index passes."""
-    validator = IgnoringNaNs(Ge(0))
-    idx = pd.Index([np.nan, np.nan, np.nan])
     validator = IgnoringNaNs(Ge(0))
     idx = pd.Index([np.nan, np.nan, np.nan])
     assert validator.validate(idx) is None
@@ -336,3 +336,91 @@ class TestComparisonNaNHandling:
     # selects numeric columns surgically.
     with pytest.raises(ValueError, match="Data must be finite"):
       func(df)
+
+  def test_ignoring_nans_index(self):
+    # Test IgnoringNaNs with pd.Index
+    v = IgnoringNaNs(Ge(0))
+    idx = pd.Index([1, -1, np.nan])
+    with pytest.raises(ValueError, match="Data must be >= 0"):
+      v.validate(idx)  # Should validate -1 and fail
+
+    idx_valid = pd.Index([1, 2, np.nan])
+    v.validate(idx_valid)  # Should pass
+
+  def test_ignoring_nans_holistic_dataframe_fallback(self):
+    # Test IgnoringNaNs with a holistic validator on DataFrame
+    # Should use dropna() fallback
+
+    # Mock holistic validator
+    class HolisticV(Ge):
+      is_holistic = True
+
+    v = IgnoringNaNs(HolisticV(0))
+    df = pd.DataFrame({"a": [1, -1, np.nan], "b": [1, 1, 1]})
+
+    # -1 is in row 1. NaN is in row 2.
+    # dropna() removes row 2.
+    # So it validates [1, -1] and [1, 1].
+    # Should fail on -1.
+    with pytest.raises(ValueError, match="Data must be >= 0"):
+      v.validate(df)
+
+  def test_ignoring_nans_no_vectorization(self):
+    # Test IgnoringNaNs with a validator that raises NotImplementedError in validate_vectorized
+    class NoVecV(Ge):
+      def validate_vectorized(self, data):
+        raise NotImplementedError
+
+    v = IgnoringNaNs(NoVecV(0))
+    s = pd.Series([1, -1, np.nan])
+    with pytest.raises(ValueError, match="Data must be >= 0"):
+      v.validate(s)
+
+  def test_ignoring_nans_validate_vectorized_not_implemented(self):
+    class NoVecV(Ge):
+      # Remove validate_vectorized
+      pass
+
+    class Dummy(Validator):
+      pass
+
+    v = IgnoringNaNs(Dummy)
+    with pytest.raises(NotImplementedError):
+      v.validate_vectorized(pd.Series([1]))
+
+  def test_ignoring_nans_transform(self):
+    # Test IgnoringNaNs(HasColumn(...)) transformation
+    # This logic is triggered by ValidationPlanBuilder, so we use @validate
+
+    @validate
+    def func(df: Annotated[pd.DataFrame, IgnoringNaNs(HasColumn("a", Ge(0)))]):
+      _ = df
+      return True
+
+    # "a" has NaN. Should be ignored. -1 should fail.
+    df_valid = pd.DataFrame({"a": [1, np.nan]})
+    assert func(df_valid) is True
+
+    df_invalid = pd.DataFrame({"a": [-1, np.nan]})
+    with pytest.raises(ValueError, match="Data must be >= 0"):
+      func(df_invalid)
+
+  def test_ignoring_nans_with_ignore_nan_method(self):
+    # Test IgnoringNaNs wrapping a validator that has with_ignore_nan (like Finite)
+    @validate
+    def func(df: Annotated[pd.DataFrame, IgnoringNaNs(Finite)]):
+      _ = df
+      return True
+
+    # Finite normally allows NaN. IgnoringNaNs(Finite) should basically be Finite.
+    # But strictly speaking, Finite.with_ignore_nan returns self or new Finite.
+    # So it unwraps IgnoringNaNs.
+
+    df = pd.DataFrame({"a": [1, np.inf]})
+    with pytest.raises(ValueError, match="Data must be finite"):
+      func(df)
+
+  def test_allow_markers(self):
+    # Just cover the validate method
+    AllowNaN().validate(pd.Series([1]))
+    AllowInf().validate(pd.Series([1]))

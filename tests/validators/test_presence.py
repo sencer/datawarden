@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from datawarden import IsNaN, Not, NotEmpty, NotNaN
+from datawarden import Empty, IsNaN, Not, NotEmpty, NotNaN
 
 
 class TestNotNaN:
@@ -85,3 +85,10 @@ class TestNotEmpty:
     validator = NotEmpty()
     with pytest.raises(TypeError, match="requires pandas"):
       validator.validate(42)
+
+  def test_empty_not_empty_negate(self):
+    e = Empty()
+    assert isinstance(e.negate(), NotEmpty)
+
+    ne = NotEmpty()
+    assert isinstance(ne.negate(), Empty)

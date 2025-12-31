@@ -1,7 +1,8 @@
 import pandas as pd
 import pytest
 
-from datawarden import Between, Is, Not, Validated, validate
+from datawarden import Between, Ge, Is, Not, Validated, validate
+from datawarden.base import Validator
 
 
 class TestNotValidator:
@@ -68,3 +69,36 @@ class TestNotValidator:
     s = pd.Series([1, 2])
     with pytest.raises(ValueError, match="Data must not dummy"):
       v.validate(s)
+
+  def test_not_validator_logic(self):
+    # Not(Ge(0)) -> < 0
+    v = Not(Ge(0))
+    v.validate(-1)
+    with pytest.raises(ValueError):
+      v.validate(1)
+
+    # Vectorized
+    assert v.validate_vectorized(pd.Series([-1])).all()
+    assert not v.validate_vectorized(pd.Series([1])).all()
+
+    # Double negation optimization
+    _ = Not(Not(Ge(0)))
+
+  def test_not_validator_generic_fallback(self):
+    # Use a validator that does NOT have negate()
+    class NoNegate(Validator):
+      def validate(self, data):
+        if data == "valid":
+          pass
+        else:
+          raise ValueError("Invalid")
+
+    v = Not(NoNegate())
+
+    # Not(NoNegate) means: if NoNegate PASSES, Not FAILS.
+    # If NoNegate FAILS, Not PASSES.
+
+    v.validate("invalid")  # NoNegate raises -> Not catches -> Valid
+
+    with pytest.raises(ValueError, match="must not"):
+      v.validate("valid")  # NoNegate passes -> Not raises
