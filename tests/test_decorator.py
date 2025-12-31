@@ -227,6 +227,24 @@ class TestValidatedDecorator:
     result = process(valid_data, multiplier=2.0)
     assert result.tolist() == [2.0, 4.0, 6.0]
 
+  def test_chunking_execution(self):
+    """Test validation with chunking enabled."""
+    config = get_config()
+    orig_chunk = config.chunk_size_rows
+    config.chunk_size_rows = 2
+
+    try:
+      # Ge is chunkable.
+      @validate
+      def func(df: Annotated[pd.DataFrame, Ge(0)]):
+        _ = df
+        return True
+
+      df = pd.DataFrame({"a": [1, 2, 3, 4, 5]})
+      assert func(df) is True
+    finally:
+      config.chunk_size_rows = orig_chunk
+
 
 class TestComplexValidations:
   """Tests for complex validation scenarios."""
@@ -423,6 +441,31 @@ class TestEdgeCases:
     result = process(valid_data, skip_validation=False)
     assert result == 6.0
 
+  def test_type_mismatch_raises(self):
+    @validate
+    def func(x: Annotated[int, Ge(0)]):
+      return x
+
+    with pytest.raises(TypeError, match="Type mismatch"):
+      func("s")
+
+  def test_validator_failure_raises(self):
+    @validate
+    def func(x: Annotated[int, Ge(0)]):
+      return x
+
+    with pytest.raises(ValueError, match="Data must be >= 0"):
+      func(-1)
+
+  def test_pandas_column_failure_raises(self):
+    @validate
+    def func(df: Annotated[pd.DataFrame, HasColumn("a", Ge(0))]):
+      _ = df
+      return True
+
+    with pytest.raises(ValueError, match="Data must be >= 0"):
+      func(pd.DataFrame({"a": [-1]}))
+
   def test_default_argument_values(self):
     """Test validation with default argument values."""
 
@@ -439,6 +482,21 @@ class TestEdgeCases:
     # Override default
     result = process(pd.Series([5.0, 6.0]))
     assert result == 11.0
+
+  def test_binding_errors_fast_path(self):
+    """Test errors in decorator's fast parameter binding path."""
+
+    @validate
+    def func_strict(a: int):
+      _ = a
+
+    # Pass 'b' which is not in signature.
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+      func_strict(1, b=2)
+
+    # To hit "multiple values for argument"
+    with pytest.raises(TypeError, match="multiple values for argument"):
+      func_strict(1, a=2)
 
 
 def test_validated_decorator_defaults():
@@ -714,6 +772,24 @@ class TestWarnOnlyEdgeCases:
     finally:
       logger.remove(handler_id)
 
+  def test_warn_only_column_validation_failure(self):
+    """Test warn_only behavior when a specific column validator fails."""
+
+    @validate(warn_only_by_default=True)
+    def func(df: Annotated[pd.DataFrame, HasColumn("a", Ge(10))]):
+      return df
+
+    df = pd.DataFrame({"a": [5]})
+    logs = []
+    handler_id = logger.add(logs.append, format="{message}")
+    try:
+      res = func(df)
+      assert res is None
+      assert any("Validation failed" in str(m) for m in logs)
+      assert any("Column 'a'" in str(m) for m in logs)
+    finally:
+      logger.remove(handler_id)
+
 
 class TestParallelExecution:
   """Tests for parallel execution path."""
@@ -766,6 +842,47 @@ class TestParallelExecution:
     # Should return None and log errors, but NOT raise
     result = process_warn(s_invalid, s_invalid, warn_only=True)
     assert result is None
+
+  def test_parallel_execution_low_threshold(self):
+    # Force parallel execution using direct threshold set
+    config = get_config()
+    orig_threshold = config.parallel_threshold_rows
+    config.parallel_threshold_rows = 1  # Low threshold
+
+    try:
+
+      @validate
+      def func(
+        df1: Annotated[pd.DataFrame, Ge(0)], df2: Annotated[pd.DataFrame, Ge(0)]
+      ):
+        _ = (df1, df2)
+        return True
+
+      df = pd.DataFrame({"a": [1, 2, 3]})
+      assert func(df, df) is True
+    finally:
+      config.parallel_threshold_rows = orig_threshold
+
+  def test_parallel_execution_failure_warn_only(self):
+    config = get_config()
+    orig_threshold = config.parallel_threshold_rows
+    config.parallel_threshold_rows = 1
+
+    try:
+
+      @validate(warn_only_by_default=True)
+      def func(
+        df1: Annotated[pd.DataFrame, Ge(10)], df2: Annotated[pd.DataFrame, Ge(0)]
+      ):
+        _ = (df1, df2)
+        return True
+
+      df_fail = pd.DataFrame({"a": [1, 2, 3]})  # Fail
+      df_pass = pd.DataFrame({"a": [1, 2, 3]})  # Pass
+
+      assert func(df_fail, df_pass) is None
+    finally:
+      config.parallel_threshold_rows = orig_threshold
 
 
 def test_decorator_slow_path_varargs():
