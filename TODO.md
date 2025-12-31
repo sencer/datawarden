@@ -9,7 +9,5 @@
     - Added check for unexpected kwargs in `decorator.py` fast path.
 - [x] **[LOW] Validation order should follow signature order.**
     - Updated `validation_order` logic in `decorator.py`.
-
-## Pending
-- [ ] **[MEDIUM] Suboptimal validator fusion logic.**
-    - `src/datawarden/plan.py` fuses all validators because `hasattr(v, "validate_vectorized")` is always true. Should check `v.is_promotable` or a more specific flag.
+- [x] **[MEDIUM] Suboptimal validator fusion logic.**
+    - Updated `src/datawarden/plan.py` to correctly identify vectorizable validators by checking for method overrides.

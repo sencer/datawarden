@@ -118,7 +118,8 @@ class ValidationPlanBuilder:
 
     for v in validators:
       # Fuse consecutive validators that support vectorized execution
-      if hasattr(v, "validate_vectorized"):
+      # We check if the class has overridden the base validate_vectorized method
+      if type(v).validate_vectorized is not Validator.validate_vectorized:
         current_group.append(v)
       else:
         if current_group:
