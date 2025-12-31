@@ -79,6 +79,11 @@ def validate[**P, R](
     the decorator will respect them and pass the values through to your function,
     while still using them to control validation behavior.
 
+    **Reserved Keywords:** When calling a decorated function, `skip_validation`
+    and `warn_only` are treated as control flags and removed from `kwargs` unless
+    they appear in the function signature. Do not use these names for `**kwargs`
+    parameters that your function logic depends on.
+
   Validation features:
   - **Type Checking:** Runtime checks against Annotated base types.
   - **Constraint Validation:** Applies all validators in the Annotated metadata.
@@ -275,6 +280,7 @@ def validate[**P, R](
     # Pre-compute signature details for fast binding
     parameters = list(sig.parameters.values())
     arg_names = [p.name for p in parameters]
+    arg_set = set(arg_names)
 
     # Check if we have var-args (args/kwargs) which complicate fast path
     has_var_args = any(
@@ -292,7 +298,9 @@ def validate[**P, R](
       arg_validators.keys()
     )
     # Sort for deterministic execution
-    validation_order = sorted(param_names_with_validation)
+    validation_order = [
+      name for name in arg_names if name in param_names_with_validation
+    ]
 
     # Pre-calculate if any stateful validators exist
     all_stateful = []
@@ -326,6 +334,10 @@ def validate[**P, R](
         # Kwargs
         if kwargs:
           for k, v in kwargs.items():
+            if k not in arg_set:
+              raise TypeError(
+                f"{func.__name__} got an unexpected keyword argument '{k}'"
+              )
             if k in bound_arguments:
               raise TypeError(f"{func.__name__} got multiple values for argument '{k}'")
             bound_arguments[k] = v
