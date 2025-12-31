@@ -66,7 +66,7 @@ class TestStandardizedIndexValidation:
 
     # Check invalid input (NaN)
     idx_nan = pd.Index([1.0, np.nan, 3.0])
-    with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
+    with pytest.raises(ValueError, match="Data must not contain NaN"):
       Not(IsNaN()).validate(idx_nan)
 
   def test_comparison_on_index(self):
@@ -117,7 +117,7 @@ class TestStandardizedIndexValidation:
 
     # Check invalid input (< 0)
     idx_neg = pd.Index([1, -1, 2])
-    with pytest.raises(ValueError, match="must be non-negative"):
+    with pytest.raises(ValueError, match="must be >= 0"):
       Not(Negative()).validate(idx_neg)
 
   def test_positive_on_index(self):
@@ -152,5 +152,5 @@ class TestStandardizedIndexValidation:
 
     # Check invalid input (> 0)
     idx_pos = pd.Index([-1, 1, -2])
-    with pytest.raises(ValueError, match="must be non-positive"):
+    with pytest.raises(ValueError, match="must be <= 0"):
       Not(Positive()).validate(idx_pos)

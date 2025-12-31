@@ -11,6 +11,7 @@ from datawarden.validators import (
   Index,
   MaxGap,
   MonoUp,
+  NotNaN,
   Shape,
   StrictFinite,
   Unique,
@@ -23,7 +24,7 @@ def test_relaxation_allow_nan():
   # Global Not(IsNaN), but Local AllowNaN for column "A"
   @validate
   def process_data(
-    df: Validated[pd.DataFrame, Not(IsNaN), HasColumn("A", AllowNaN)],
+    df: Validated[pd.DataFrame, NotNaN, HasColumn("A", AllowNaN)],
   ) -> None:
     pass
 
@@ -33,7 +34,7 @@ def test_relaxation_allow_nan():
 
   df_fail = pd.DataFrame({"A": [1.0, 2.0], "B": [1.0, float("nan")]})
   # Should fail because B has NaNs and no local override
-  with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
+  with pytest.raises(ValueError, match="Data must not contain NaN"):
     process_data(df_fail)
 
 

@@ -29,7 +29,7 @@ from datawarden import (
   MonoUp,
   Negative,
   Not,
-  NotIsNaN,
+  NotNaN,
   Positive,
   Validated,
   validate,
@@ -169,12 +169,12 @@ def run_all_benchmarks():
     return data.sum()
 
   @validate
-  def validated_df_global(data: Validated[pd.DataFrame, Finite, NotIsNaN]):
+  def validated_df_global(data: Validated[pd.DataFrame, Finite, NotNaN]):
     return True
 
   @validate
   def validated_df_local(
-    data: Validated[pd.DataFrame, Finite, NotIsNaN, HasColumn("a", Ge(0))],
+    data: Validated[pd.DataFrame, Finite, NotNaN, HasColumn("a", Ge(0))],
   ):
     return True
 

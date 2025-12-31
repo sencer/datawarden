@@ -197,7 +197,7 @@ class TestIgnoringNaNsWrapper:
 
     # Fails on negative
     invalid = pd.Series([0.0, np.nan, -1.0])
-    with pytest.raises(ValueError, match="must be non-negative"):
+    with pytest.raises(ValueError, match="must be >= 0"):
       validator.validate(invalid)
 
   def test_with_finite_validator(self):

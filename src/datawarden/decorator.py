@@ -130,7 +130,10 @@ def validate[**P, R](
       warn_only: bool,
       mode: str = "all",
     ) -> bool:
-      """Validate a single argument. Returns is_valid."""
+      """Validate a single argument.
+
+      Returns is_valid.
+      """
       # Check base type first (skip if value is None - Optional types allow None)
       # Only check type in "all" or "non-chunkable" modes to avoid redundant checks
       if mode != "chunkable" and arg_name in arg_base_types and value is not None:

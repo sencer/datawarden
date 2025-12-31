@@ -1,4 +1,4 @@
-"""datawarden - Pandas validation using Annotated types and decorators."""
+"""Datawarden - Pandas validation using Annotated types and decorators."""
 
 __version__ = "0.1.1"
 
@@ -36,11 +36,10 @@ from datawarden.validators import (
   MonoUp,
   Negative,
   NonNegative,
-  NonPositive,
   Not,
   NotEmpty,
   NoTimeGaps,
-  NotIsNaN,
+  NotNaN,
   OneOf,
   Outside,
   Positive,
@@ -76,10 +75,9 @@ __all__ = [
   "Negative",
   "NoTimeGaps",
   "NonNegative",
-  "NonPositive",
   "Not",
   "NotEmpty",
-  "NotIsNaN",
+  "NotNaN",
   "OneOf",
   "Outside",
   "Positive",

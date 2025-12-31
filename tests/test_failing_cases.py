@@ -59,7 +59,7 @@ def test_non_nan_on_non_numeric():
   """Not(IsNaN) should work correctly on non-numeric data."""
   v = Not(IsNaN())
   s = pd.Series(["a", None, "c"])
-  with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
+  with pytest.raises(ValueError, match="Data must not contain NaN"):
     v.validate(s)
 
   s_valid = pd.Series(["a", "b", "c"])

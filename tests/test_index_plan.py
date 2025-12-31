@@ -28,7 +28,7 @@ def test_index_plan_global_nan():
     return idx
 
   # Should fail on NaN
-  with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
+  with pytest.raises(ValueError, match="Data must not contain NaN"):
     process(pd.Index([1.0, np.nan, 3.0]))
 
 

@@ -127,20 +127,23 @@ class Not(Validator[pd.Series | pd.DataFrame | pd.Index], MetaValidator):
 
     # Check for NaN values first (unless ignore_nan is True)
     if not self.ignore_nan:
-      if hasattr(data, "isna"):
-        nan_mask = data.isna()
-      elif hasattr(data, "values"):
-        nan_mask = pd.isna(data.values)
-      else:
-        nan_mask = pd.isna(data)
+      desc = self.describe()
+      # Optimization: If we are validating "not contain NaN", the NaN guard
+      # is redundant and produces a worse error message than the validator itself.
+      if desc != "not contain NaN":
+        if hasattr(data, "isna"):
+          nan_mask = data.isna()
+        elif hasattr(data, "values"):
+          nan_mask = pd.isna(data.values)
+        else:
+          nan_mask = pd.isna(data)
 
-      if scalar_any(nan_mask):
-        desc = self.describe()
-        report_failures(
-          data,
-          nan_mask,
-          f"Cannot validate {desc} with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
-        )
+        if scalar_any(nan_mask):
+          report_failures(
+            data,
+            nan_mask,
+            f"Cannot validate {desc} with NaN values (use IgnoringNaNs wrapper to skip NaN values)",
+          )
 
     # Try vectorized path first
     if self.is_vectorized:
@@ -171,7 +174,7 @@ class Not(Validator[pd.Series | pd.DataFrame | pd.Index], MetaValidator):
         # Report failures
         desc = self.describe()
         msg = f"Data must {desc}" if desc.startswith("not ") else f"Data must be {desc}"
-        report_failures(data, ~mask, msg)
+        report_failures(data, np.logical_not(mask), msg)
         return
 
       except (NotImplementedError, AttributeError):
