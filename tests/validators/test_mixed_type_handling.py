@@ -49,9 +49,9 @@ class TestMixedTypeHandling:
     arg_validators, _ = builder.build()
     plan = arg_validators["df"]
 
-    assert len(plan["holistic"]) == 1
-    assert isinstance(plan["holistic"][0], IgnoringNaNs)
-    assert isinstance(plan["holistic"][0].wrapped, Rows)
+    assert len(plan["slow_holistic"]) == 1
+    assert isinstance(plan["slow_holistic"][0][0], IgnoringNaNs)
+    assert isinstance(plan["slow_holistic"][0][0].wrapped, Rows)
     assert len(plan["default"]) == 0
 
   def test_ignoring_nans_rows_execution(self):

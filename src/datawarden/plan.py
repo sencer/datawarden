@@ -6,7 +6,7 @@ import inspect
 import typing
 from typing import Annotated, Any, get_args, get_origin
 
-from datawarden.base import CompoundValidator, Validator
+from datawarden.base import CompoundValidator, Priority, Validator
 from datawarden.exceptions import LogicError
 from datawarden.protocols import MetaValidator
 from datawarden.solver import is_domain_validator, resolve_domains
@@ -24,14 +24,14 @@ class ValidationPlanBuilder:
     self.sig = inspect.signature(func)
     self.type_hints = typing.get_type_hints(func, include_extras=True)
 
-  def build(self) -> tuple[dict[str, Any], dict[str, type]]:
+  def build(self) -> tuple[dict[str, Any], dict[str, tuple[type, bool]]]:
     """Build validators and base types for all arguments.
 
     Returns:
       Tuple of (arg_validators, arg_base_types)
     """
     arg_validators: dict[str, Any] = {}
-    arg_base_types: dict[str, type] = {}
+    arg_base_types: dict[str, tuple[type, bool]] = {}
 
     for param_name in self.sig.parameters:
       name = str(param_name)
@@ -60,7 +60,10 @@ class ValidationPlanBuilder:
 
           if not raw_validators:
             # Store base type even if no validators, for type checking
-            arg_base_types[name] = annotated_type
+            is_pandas = is_pandas_type(annotated_type)
+            check_type = get_origin(annotated_type) or annotated_type
+            is_valid_type = isinstance(check_type, type)
+            arg_base_types[name] = (check_type, is_valid_type)
             continue
 
           is_pandas = is_pandas_type(annotated_type)
@@ -72,26 +75,50 @@ class ValidationPlanBuilder:
             # Non-pandas types
             validators = [v for v in raw_validators if isinstance(v, Validator)]
             if validators:
-              arg_validators[name] = validators
+              stateful = [v for v in validators if self._is_stateful(v)]
+              arg_validators[name] = {
+                "validators": self._prep(validators),
+                "stateful": stateful,
+                "is_pandas": False,
+              }
 
           # Store the base type for runtime type checking
-          arg_base_types[name] = annotated_type
+          check_type = get_origin(annotated_type) or annotated_type
+          is_valid_type = isinstance(check_type, type)
+          arg_base_types[name] = (check_type, is_valid_type)
 
     return arg_validators, arg_base_types
 
-  def _fuse_validators(self, validators: list[Validator[Any]]) -> list[Validator[Any]]:
-    """Group consecutive promotable validators into CompoundValidators.
+  def _is_stateful(self, v: Validator[Any]) -> bool:
+    """Check if a validator has state that needs resetting."""
+    if isinstance(v, CompoundValidator):
+      return any(self._is_stateful(sv) for sv in v.validators)
+    # Check if reset is overridden
+    return type(v).reset is not Validator.reset
 
-    This reduces function call overhead and redundant checks in the decorator.
+  def _prep(
+    self, v_list: list[Validator[Any]]
+  ) -> list[tuple[Validator[Any], bool, bool]]:
+    """Pre-calculate flags for fast access in decorator.
+
+    Format: (validator, is_chunkable, is_numeric_only)
     """
-    if not validators:
-      return []
+    return [
+      (v, getattr(v, "is_chunkable", True), getattr(v, "is_numeric_only", False))
+      for v in v_list
+    ]
+
+  def _fuse_validators(self, validators: list[Validator[Any]]) -> list[Validator[Any]]:
+    """Fuse multiple vectorizable validators into a single CompoundValidator."""
+    if len(validators) <= 1:
+      return validators
 
     fused = []
     current_group = []
 
     for v in validators:
-      if v.is_promotable:
+      # Fuse consecutive validators that support vectorized execution
+      if hasattr(v, "validate_vectorized"):
         current_group.append(v)
       else:
         if current_group:
@@ -245,16 +272,28 @@ class ValidationPlanBuilder:
     for col_validators in resolved_columns.values():
       col_validators.sort(key=lambda v: v.priority)  # pyright: ignore[reportUnknownLambdaType]
 
-    # Fuse consecutive promotable validators for performance
+    # Fuse consecutive vectorizable validators
     fused_holistic = self._fuse_validators(holistic)
     fused_default = self._fuse_validators(resolved_globals)
     fused_columns = {
       col: self._fuse_validators(specs) for col, specs in resolved_columns.items()
     }
 
+    # Pre-split holistic into fast/slow
+    fast_h = [v for v in fused_holistic if v.priority <= Priority.COMPLEX]
+    slow_h = [v for v in fused_holistic if v.priority > Priority.COMPLEX]
+
+    # Collect ALL stateful validators for fast resetting
+    stateful = [v for v in fused_holistic + fused_default if self._is_stateful(v)]
+    for specs in fused_columns.values():
+      stateful.extend([v for v in specs if self._is_stateful(v)])
+
     return {
-      "holistic": fused_holistic,
-      "columns": fused_columns,
-      "default": fused_default,
+      "fast_holistic": self._prep(fast_h),
+      "slow_holistic": self._prep(slow_h),
+      "columns": {col: self._prep(specs) for col, specs in fused_columns.items()},
+      "default": self._prep(fused_default),
+      "stateful": stateful,
       "has_col_checks": bool(col_map),
+      "is_pandas": True,
     }
