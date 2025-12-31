@@ -1085,6 +1085,8 @@ class _AnyDimConstraint:
 class IsNaN(Validator[Any]):
   """Validator and ScalarConstraint for checking if a value is NaN."""
 
+  is_promotable = True
+
   def check(self, value: object) -> bool:
     return pd.isna(cast("Any", value))
 
@@ -1107,6 +1109,8 @@ class NotNaN(Not):
 
   Equivalent to Not(IsNaN).
   """
+
+  is_promotable = True
 
   def __init__(self) -> None:
     super().__init__(IsNaN())
