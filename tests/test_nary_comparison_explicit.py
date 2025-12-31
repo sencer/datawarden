@@ -30,6 +30,24 @@ def test_n_ary_explicit_coverage():
     v.validate(df_invalid_1)
 
 
+def test_n_ary_validate_vectorized():
+  # Explicitly test the vectorized path
+  df = pd.DataFrame({"a": [10, 10, 10], "b": [5, 5, 5], "c": [1, 1, 1]})
+  v = Ge("a", "b", "c")
+  mask = v.validate_vectorized(df)
+  assert mask.all()
+
+  df_invalid = pd.DataFrame({"a": [10], "b": [5], "c": [6]})
+  mask_inv = v.validate_vectorized(df_invalid)
+  assert not mask_inv.all()
+  # first row is valid (10>=5, 5>=6 False) -> False
+  assert not mask_inv[0]
+
+  # Test error path in validate_vectorized
+  with pytest.raises(TypeError):
+    v.validate_vectorized(pd.Series([1]))
+
+
 def test_n_ary_le():
   v = Le("c", "b", "a")
   df = pd.DataFrame({"a": [10], "b": [5], "c": [1]})
