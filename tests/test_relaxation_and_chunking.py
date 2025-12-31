@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from datawarden import Validated, Validator, validate
+from datawarden import IsNaN, Not, Validated, Validator, validate
 from datawarden.config import overrides
 from datawarden.validators import (
   AllowInf,
@@ -11,7 +11,6 @@ from datawarden.validators import (
   Index,
   MaxGap,
   MonoUp,
-  NonNaN,
   Shape,
   StrictFinite,
   Unique,
@@ -19,22 +18,22 @@ from datawarden.validators import (
 
 
 def test_relaxation_allow_nan():
-  """Test that AllowNaN overrides global NonNaN."""
+  """Test that AllowNaN overrides global Not(IsNaN)."""
 
-  # Global NonNaN, but Local AllowNaN for column "A"
+  # Global Not(IsNaN), but Local AllowNaN for column "A"
   @validate
   def process_data(
-    df: Validated[pd.DataFrame, NonNaN, HasColumn("A", AllowNaN)],
+    df: Validated[pd.DataFrame, Not(IsNaN), HasColumn("A", AllowNaN)],
   ) -> None:
     pass
 
   df = pd.DataFrame({"A": [1.0, float("nan")], "B": [1.0, 2.0]})
-  # Should pass because A allows NaN locally, and B (covered by global NonNaN) has no NaNs.
+  # Should pass because A allows NaN locally, and B (covered by global Not(IsNaN)) has no NaNs.
   process_data(df)
 
   df_fail = pd.DataFrame({"A": [1.0, 2.0], "B": [1.0, float("nan")]})
   # Should fail because B has NaNs and no local override
-  with pytest.raises(ValueError, match="must not contain NaN"):
+  with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
     process_data(df_fail)
 
 
@@ -81,7 +80,7 @@ def test_chunked_validation():
   """Test that chunked validation works correctly."""
 
   @validate
-  def process(_df: Validated[pd.DataFrame, NonNaN, HasColumn("A", Ge(0))]):
+  def process(_df: Validated[pd.DataFrame, Not(IsNaN), HasColumn("A", Ge(0))]):
     return True
 
   df = pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0], "B": [10.0, 11.0, 12.0, 13.0]})
@@ -103,7 +102,7 @@ def test_mixed_chunkable_non_chunkable():
   """Test that non-chunkable validators still work when chunking is enabled."""
 
   @validate
-  def process(_df: Validated[pd.DataFrame, Shape(4, 2), NonNaN]):
+  def process(_df: Validated[pd.DataFrame, Shape(4, 2), Not(IsNaN)]):
     return True
 
   df = pd.DataFrame({"A": [1.0, 2.0, 3.0, 4.0], "B": [10.0, 11.0, 12.0, 13.0]})

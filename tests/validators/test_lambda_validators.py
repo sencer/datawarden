@@ -67,9 +67,7 @@ class TestIsValidator:
     """Test Is validator with @validate decorator."""
 
     @validate
-    def process(
-      data: Annotated[pd.Series, Is(lambda x: x**2 < 100)],
-    ) -> pd.Series:
+    def process(data: Annotated[pd.Series, Is(lambda x: x**2 < 100)]) -> pd.Series:
       return data
 
     valid = pd.Series([1, 2, 3, 9])

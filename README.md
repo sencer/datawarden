@@ -31,17 +31,17 @@ uv add datawarden
 
 ```python
 import pandas as pd
-from datawarden import validate, Validated, Finite, NonNaN, NonEmpty
+from datawarden import validate, Validated, Finite, NotNaN, NotEmpty
 
 @validate
 def calculate_returns(
-    prices: Validated[pd.Series, Finite, NonNaN, NonEmpty],
+    prices: Validated[pd.Series, Finite, NotNaN, NotEmpty],
 ) -> pd.Series:
     """Calculate percentage returns from prices.
 
     Data is explicitly checked for:
-    - Not empty (NonEmpty)
-    - No NaN values (NonNaN)
+    - Not empty (NotEmpty)
+    - No NaN values (NotNaN)
     - No infinite values (Finite)
     """
     return prices.pct_change()
@@ -63,13 +63,13 @@ calculate_returns(bad_prices)
 
 - **`Finite`** - Ensures no Inf values (allows NaN)
 - **`StrictFinite`** - Ensures no Inf AND no NaN values (uses atomic `np.isfinite()`)
-- **`NonNaN`** - Ensures no NaN values (allows Inf)
+- **`NotNaN`** - Ensures no NaN values (allows Inf)
 - **`NonNegative`** - Ensures all values >= 0
 - **`Positive`** - Ensures all values > 0
 - **`Negative`** - Ensures all values < 0
 - **`NonPositive`** - Ensures all values <= 0
 - **`Between(lower, upper)`** - Ensures values in range [lower, upper]
-- **`NonEmpty`** - Ensures data is not empty
+- **`NotEmpty`** - Ensures data is not empty
 - **`Unique`** - Ensures all values are unique
 - **`MonoUp`** - Ensures values are monotonically increasing
 - **`MonoDown`** - Ensures values are monotonically decreasing
@@ -134,22 +134,22 @@ Works with: `Ge`, `Le`, `Gt`, `Lt`, `Positive`, `NonNegative`, `Finite`, and any
 
 ### Constraint Relaxation (Local Overrides)
 
-Sometimes you want a global constraint (like `NonNaN` or `StrictFinite`) but need to allow exceptions for specific columns. Use `AllowNaN` or `AllowInf` to override global constraints locally.
+Sometimes you want a global constraint (like `NotNaN` or `StrictFinite`) but need to allow exceptions for specific columns. Use `AllowNaN` or `AllowInf` to override global constraints locally.
 
 ```python
-from datawarden import validate, Validated, NonNaN, HasColumn, AllowNaN
+from datawarden import validate, Validated, NotNaN, HasColumn, AllowNaN
 import pandas as pd
 
 @validate
 def process_data(
-    # Global NonNaN applies to all columns by default
-    df: Validated[pd.DataFrame, NonNaN, HasColumn("optional_col", AllowNaN)],
+    # Global NotNaN applies to all columns by default
+    df: Validated[pd.DataFrame, NotNaN, HasColumn("optional_col", AllowNaN)],
 ) -> pd.DataFrame:
     """Process data where 'optional_col' is allowed to have NaNs."""
     return df
 
 df = pd.DataFrame({
-    "required": [1.0, 2.0],        # Must not have NaNs (Global NonNaN)
+    "required": [1.0, 2.0],        # Must not have NaNs (Global NotNaN)
     "optional_col": [1.0, float("nan")] # NaNs allowed here (Local AllowNaN)
 })
 process_data(df) # Passes!
@@ -238,13 +238,13 @@ def process_budget(
 ### Basic Series Validation
 
 ```python
-from datawarden import validate, Validated, Positive, NonNaN
+from datawarden import validate, Validated, Positive, NotNaN
 import numpy as np
 import pandas as pd
 
 @validate
 def calculate_log_returns(
-    prices: Validated[pd.Series, Positive, NonNaN],
+    prices: Validated[pd.Series, Positive, NotNaN],
 ) -> pd.Series:
     """Calculate log returns - prices must be positive and not NaN."""
     return np.log(prices / prices.shift(1))
@@ -256,12 +256,12 @@ log_returns = calculate_log_returns(prices)
 ### DataFrame Column Validation
 
 ```python
-from datawarden import validate, Validated, HasColumns, Ge, NonNaN
+from datawarden import validate, Validated, HasColumns, Ge, NotNaN
 import pandas as pd
 
 @validate
 def calculate_true_range(
-    data: Validated[pd.DataFrame, HasColumns("high", "low", "close"), Ge("high", "low"), NonNaN],
+    data: Validated[pd.DataFrame, HasColumns("high", "low", "close"), Ge("high", "low"), NotNaN],
 ) -> pd.Series:
     """Calculate True Range - requires OHLC data."""
     hl = data["high"] - data["low"]
@@ -628,8 +628,8 @@ When a function accepts multiple validated arguments, `datawarden` automatically
 ```python
 @validate
 def process_large_data(
-    source: Validated[pd.DataFrame, Finite, NonNaN],
-    target: Validated[pd.DataFrame, Finite, NonNaN],
+    source: Validated[pd.DataFrame, Finite, NotNaN],
+    target: Validated[pd.DataFrame, Finite, NotNaN],
 ) -> pd.DataFrame:
     # Both 'source' and 'target' are validated concurrently
     return pd.merge(source, target, on="id")
@@ -650,7 +650,7 @@ Validation logic is pre-compiled at import time (when the decorator runs). The r
 To optimize performance, `datawarden` sorts validators by priority to execute cheap checks before expensive ones. This ensures immediate failure for obvious issues (like wrong shape) before attempting costly scans.
 
 **Execution Phases:**
-1. **Structural Checks (Priority 0):** `Shape`, `HasColumns`, `IsDtype`, `NonEmpty`. (O(1))
+1. **Structural Checks (Priority 0):** `Shape`, `HasColumns`, `IsDtype`, `NotEmpty`. (O(1))
 2. **Fast Holistic Checks:** Fast global checks.
 3. **Column-wise Validation:** All column-specific validators.
 4. **Slow Holistic Checks (Priority 100):** Comparison of all rows, `Rows(lambda)`, etc.
@@ -725,7 +725,7 @@ with overrides(chunk_size_rows=100_000):
 ```
 
 **Supported Validators:**
-- **Stateless Validators:** `Ge`, `Le`, `NonNaN`, `Finite`, `Is`, `Rows`, etc. (Validated per chunk independently).
+- **Stateless Validators:** `Ge`, `Le`, `NotNaN`, `Finite`, `Is`, `Rows`, etc. (Validated per chunk independently).
 - **Stateful Validators:** `MonoUp`, `MonoDown`, `NoTimeGaps`, `MaxGap`, `MaxDiff`. (State is preserved across chunks to ensure global correctness).
 - **Index Validators:** `Index(MonoUp)`, etc.
 
@@ -762,7 +762,7 @@ Validation in `datawarden` is opt-in. By default, arguments wrapped in `Validate
 To enforce strict checks like "no NaNs" or "not empty", you must explicitly add the corresponding validators:
 
 ```python
-from datawarden import validate, Validated, NonNaN, NonEmpty
+from datawarden import validate, Validated, NotNaN, NotEmpty
 import pandas as pd
 
 @validate
@@ -773,7 +773,7 @@ def process_flexible(data: Validated[pd.Series, None]) -> float:
     return data.sum()
 
 @validate
-def process_strict(data: Validated[pd.Series, NonNaN, NonEmpty]) -> float:
+def process_strict(data: Validated[pd.Series, NotNaN, NotEmpty]) -> float:
     """Rejects NaNs and empty data."""
     return data.sum()
 ```

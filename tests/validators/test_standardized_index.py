@@ -9,12 +9,11 @@ from datawarden import (
   Ge,
   Gt,
   Index,
+  IsNaN,
   Le,
   Lt,
   Negative,
-  NonNaN,
-  NonNegative,
-  NonPositive,
+  Not,
   Positive,
   Shape,
   StrictFinite,
@@ -60,15 +59,15 @@ class TestStandardizedIndexValidation:
       validator.validate(idx_inf)
 
   def test_non_nan_on_index(self):
-    """Test NonNaN validator works on pd.Index."""
+    """Test Not(IsNaN) validator works on pd.Index."""
     # Valid
     idx = pd.Index([1.0, 2.0, 3.0])
-    assert NonNaN().validate(idx) is None
+    assert Not(IsNaN()).validate(idx) is None
 
     # Check invalid input (NaN)
     idx_nan = pd.Index([1.0, np.nan, 3.0])
-    with pytest.raises(ValueError, match="must not contain NaN"):
-      NonNaN().validate(idx_nan)
+    with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
+      Not(IsNaN()).validate(idx_nan)
 
   def test_comparison_on_index(self):
     """Test comparison validators (Ge, Le, etc.) on pd.Index."""
@@ -111,15 +110,15 @@ class TestStandardizedIndexValidation:
       Shape(Lt(3)).validate(idx)
 
   def test_non_negative_on_index(self):
-    """Test NonNegative validator works on pd.Index."""
+    """Test Not(Negative) validator works on pd.Index."""
     # Valid
     idx = pd.Index([0, 1, 2])
-    assert NonNegative().validate(idx) is None
+    assert Not(Negative()).validate(idx) is None
 
     # Check invalid input (< 0)
     idx_neg = pd.Index([1, -1, 2])
     with pytest.raises(ValueError, match="must be non-negative"):
-      NonNegative().validate(idx_neg)
+      Not(Negative()).validate(idx_neg)
 
   def test_positive_on_index(self):
     """Test Positive validator works on pd.Index."""
@@ -145,13 +144,13 @@ class TestStandardizedIndexValidation:
       Negative().validate(idx_pos)
 
   def test_non_positive_on_index(self):
-    """Test NonPositive validator works on pd.Index."""
+    """Test Not(Positive) validator works on pd.Index."""
 
     # Valid
     idx = pd.Index([0, -1, -2])
-    assert NonPositive().validate(idx) is None
+    assert Not(Positive()).validate(idx) is None
 
     # Check invalid input (> 0)
     idx_pos = pd.Index([-1, 1, -2])
     with pytest.raises(ValueError, match="must be non-positive"):
-      NonPositive().validate(idx_pos)
+      Not(Positive()).validate(idx_pos)

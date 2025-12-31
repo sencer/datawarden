@@ -6,7 +6,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from datawarden import HasColumn, IgnoringNaNs, Index, MaxDiff, MaxGap, NoTimeGaps
+from datawarden import (
+  HasColumn,
+  IgnoringNaNs,
+  Index,
+  MaxDiff,
+  MaxGap,
+  NoTimeGaps,
+)
 
 
 class TestNoTimeGaps:

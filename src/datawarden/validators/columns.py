@@ -18,6 +18,7 @@ class IsDtype(Validator[pd.Series | pd.DataFrame]):
     super().__init__()
     self.dtype = np.dtype(dtype)
     self.priority = Priority.STRUCTURAL
+    self.is_promotable = True
 
   @override
   def validate(self, data: pd.Series | pd.DataFrame) -> None:
@@ -49,6 +50,7 @@ class HasColumns(Validator[pd.DataFrame]):
     *validators: Validator[Any],
   ) -> None:
     super().__init__()
+    self.priority = Priority.STRUCTURAL
     self.columns = columns
 
     instantiated: list[Validator[Any]] = []
@@ -58,6 +60,9 @@ class HasColumns(Validator[pd.DataFrame]):
         instantiated.append(v)
     self.validators = tuple(instantiated)
     self.is_chunkable = all(v.is_chunkable for v in instantiated)
+
+    # Dynamic Priority: Ensure it runs at the level of its slowest child
+    self.priority = max([Priority.STRUCTURAL, *(v.priority for v in instantiated)])
 
   @override
   def reset(self) -> None:
@@ -98,6 +103,7 @@ class HasColumn(Validator[pd.DataFrame]):
     *validators: Validator[Any] | type[Validator[Any]],
   ) -> None:
     super().__init__()
+    self.priority = Priority.STRUCTURAL
     self.column = column
 
     # Instantiate validators at construction time (unify with HasColumns)
@@ -108,6 +114,10 @@ class HasColumn(Validator[pd.DataFrame]):
         instantiated.append(v)
     self.validators = tuple(instantiated)
     self.is_chunkable = all(v.is_chunkable for v in instantiated)
+    self.is_promotable = all(v.is_promotable for v in instantiated)
+
+    # Dynamic Priority: Runs at the level of its slowest child
+    self.priority = max([Priority.STRUCTURAL, *(v.priority for v in instantiated)])
 
   @override
   def reset(self) -> None:

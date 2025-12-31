@@ -16,7 +16,8 @@ from datawarden import (
   Le,
   Lt,
   MonoUp,
-  NonNegative,
+  Negative,
+  Not,
   Positive,
   Shape,
   validate,
@@ -68,9 +69,7 @@ class TestIgnoringNaNsWrapper:
     """Test that IgnoringNaNs() marker wraps all validators."""
 
     @validate
-    def process(
-      data: Annotated[pd.Series, Ge(0), Le(100), IgnoringNaNs],
-    ) -> pd.Series:
+    def process(data: Annotated[pd.Series, Ge(0), Le(100), IgnoringNaNs]) -> pd.Series:
       return data
 
     # Should pass - NaN values are ignored
@@ -82,9 +81,7 @@ class TestIgnoringNaNsWrapper:
     """Test that marker mode still validates non-NaN values."""
 
     @validate
-    def process(
-      data: Annotated[pd.Series, Ge(0), Le(100), IgnoringNaNs],
-    ) -> pd.Series:
+    def process(data: Annotated[pd.Series, Ge(0), Le(100), IgnoringNaNs]) -> pd.Series:
       return data
 
     invalid_data = pd.Series([10.0, np.nan, 150.0])  # 150 > 100
@@ -192,9 +189,9 @@ class TestIgnoringNaNsWrapper:
       validator.validate(invalid)
 
   def test_with_nonnegative_validator(self):
-    """Test IgnoringNaNs works with NonNegative validator."""
+    """Test IgnoringNaNs works with Not(Negative) validator."""
 
-    validator = IgnoringNaNs(NonNegative)
+    validator = IgnoringNaNs(Not(Negative()))
     data = pd.Series([0.0, np.nan, 1.0, np.nan, 2.0])
     assert validator.validate(data) is None
 

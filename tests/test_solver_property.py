@@ -24,7 +24,7 @@ def test_resolve_domains_range_intersection(low, high):
       pytest.fail(
         f"Contradiction Ge({low}), Le({high}) in same scope did not raise LogicError"
       )
-    # Should have Ge, Le and NonNaN (default domain behavior)
+    # Should have Ge, Le and Not(IsNaN) (default domain behavior)
     assert len(resolved) >= 2
   except LogicError:
     assert low > high
@@ -42,7 +42,7 @@ def test_resolve_domains_arbitrary_merge(c1, c2):
   """Property: resolve_domains should merge any two range constraints or raise LogicError if contradictory in same scope."""
   try:
     resolved = resolve_domains([], [c1, c2])
-    # Max resolved: Ge, Le, NonNaN = 3
+    # Max resolved: Ge, Le, Not(IsNaN) = 3
     assert len(resolved) <= 3
   except LogicError:
     # Valid outcome for contradictions in same scope

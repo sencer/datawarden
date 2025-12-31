@@ -15,10 +15,11 @@ from datawarden import (
   HasColumns,
   IgnoringNaNs,
   Index,
+  IsNaN,
   MaxDiff,
   MonoUp,
-  NonEmpty,
-  NonNaN,
+  Not,
+  NotEmpty,
   Positive,
   Shape,
   Validated,
@@ -118,9 +119,7 @@ class TestValidatedDecorator:
     """Test DataFrame validation."""
 
     @validate
-    def process(
-      data: Validated[pd.DataFrame, HasColumns(["a", "b"]), Finite],
-    ):
+    def process(data: Validated[pd.DataFrame, HasColumns(["a", "b"]), Finite]):
       return data["a"] + data["b"]
 
     valid_data = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
@@ -426,9 +425,7 @@ class TestEdgeCases:
     """Test validation with default argument values."""
 
     @validate
-    def process(
-      data: Validated[pd.Series, Finite] | None = None,
-    ):
+    def process(data: Validated[pd.Series, Finite] | None = None):
       if data is None:
         data = pd.Series([1.0, 2.0])
       return data.sum()
@@ -527,7 +524,7 @@ def test_warn_only():
 
 
 class TestOptInStrictness:
-  """Tests for opt-in strictness (NonNaN, NonEmpty)."""
+  """Tests for opt-in strictness (Not(IsNaN), NotEmpty)."""
 
   def test_nan_allowed_by_default(self):
     """Test that Validated allows NaN by default."""
@@ -550,31 +547,31 @@ class TestOptInStrictness:
     assert process(pd.Series([], dtype=float)) == 0
 
   def test_explicit_non_nan(self):
-    """Test explicit NonNaN validator."""
+    """Test explicit Not(IsNaN) validator."""
 
     @validate
-    def process(data: Validated[pd.Series, NonNaN]):
+    def process(data: Validated[pd.Series, Not(IsNaN)]):
       return data.sum()
 
     # Valid data
     assert process(pd.Series([1, 2, 3])) == 6.0
 
     # NaN data fails
-    with pytest.raises(ValueError, match="must not contain NaN"):
+    with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
       process(pd.Series([1, np.nan, 3]))
 
   def test_explicit_non_empty(self):
-    """Test explicit NonEmpty validator."""
+    """Test explicit NotEmpty validator."""
 
     @validate
-    def process(data: Validated[pd.Series, NonEmpty]):
+    def process(data: Validated[pd.Series, NotEmpty]):
       return len(data)
 
     # Valid data
     assert process(pd.Series([1])) == 1
 
     # Empty data fails
-    with pytest.raises(ValueError, match="Data must not be empty"):
+    with pytest.raises(ValueError, match="Data must be non-empty"):
       process(pd.Series([], dtype=float))
 
   def test_markers_ignored(self):
@@ -605,17 +602,15 @@ class TestOptInStrictness:
     """Test HasColumn with explicit strictness."""
 
     @validate
-    def process(
-      data: Validated[pd.DataFrame, HasColumn("a", NonNaN, NonEmpty)],
-    ):
+    def process(data: Validated[pd.DataFrame, HasColumn("a", Not(IsNaN), NotEmpty)]):
       return len(data)
 
     # NaN fails
-    with pytest.raises(ValueError, match="must not contain NaN"):
+    with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
       process(pd.DataFrame({"a": [1, np.nan]}))
 
     # Empty fails
-    with pytest.raises(ValueError, match="Data must not be empty"):
+    with pytest.raises(ValueError, match="Data must be non-empty"):
       process(pd.DataFrame({"a": []}, dtype=float))
 
   def test_mixed_column_validation(self):
@@ -625,7 +620,7 @@ class TestOptInStrictness:
     def process(
       data: Validated[
         pd.DataFrame,
-        HasColumn("strict", NonNaN),
+        HasColumn("strict", Not(IsNaN)),
         HasColumn("lax"),
       ],
     ):
@@ -643,7 +638,7 @@ class TestOptInStrictness:
       "strict": [1, np.nan, 3],
       "lax": [1, 2, 3],
     })
-    with pytest.raises(ValueError, match="must not contain NaN"):
+    with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
       process(df_fail)
 
 

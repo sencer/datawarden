@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from datawarden import Ge, NonNaN, Validated, validate
+from datawarden import Ge, IsNaN, Not, Validated, validate
 
 
 def test_index_plan_domain_resolution():
@@ -21,14 +21,14 @@ def test_index_plan_domain_resolution():
 
 
 def test_index_plan_global_nan():
-  # If pd.Index uses Plan mode, NonNaN should be applied
+  # If pd.Index uses Plan mode, Not(IsNaN) should be applied
 
   @validate
-  def process(idx: Validated[pd.Index, NonNaN]):
+  def process(idx: Validated[pd.Index, Not(IsNaN)]):
     return idx
 
   # Should fail on NaN
-  with pytest.raises(ValueError, match="Data must not contain NaN"):
+  with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
     process(pd.Index([1.0, np.nan, 3.0]))
 
 

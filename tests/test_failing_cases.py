@@ -6,8 +6,9 @@ import pytest
 from datawarden import (
   Finite,
   IgnoringNaNs,
+  IsNaN,
   MonoUp,
-  NonNaN,
+  Not,
   Rows,
   StrictFinite,
   validate,
@@ -55,10 +56,10 @@ def test_ignoring_nans_wrapping_rows():
 
 
 def test_non_nan_on_non_numeric():
-  """NonNaN should work correctly on non-numeric data."""
-  v = NonNaN()
+  """Not(IsNaN) should work correctly on non-numeric data."""
+  v = Not(IsNaN())
   s = pd.Series(["a", None, "c"])
-  with pytest.raises(ValueError, match="must not contain NaN"):
+  with pytest.raises(ValueError, match="Cannot validate not contain NaN with NaN"):
     v.validate(s)
 
   s_valid = pd.Series(["a", "b", "c"])

@@ -35,7 +35,7 @@ class TestFinite:
     """Test Finite validator allows NaN (unless strictly forbidden)."""
     data = pd.Series([1.0, np.nan, 3.0])
     validator = Finite()
-    # Finite allows NaN - strict NonNaN check must be explicit
+    # Finite allows NaN - strict Not(IsNaN) check must be explicit
     assert validator.validate(data) is None
 
   def test_validate_dataframe_with_inf_values_raises_error(self):

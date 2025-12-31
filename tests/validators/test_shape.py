@@ -123,7 +123,7 @@ class TestShape:
 
   def test_internal_any_dim_describe_returns_correct_string(self):
     """Test internal describe method of Any wrapper."""
-    # Since logic normally prevents describe() from reaching (check always True),
+    # Since logic normally prevents describe() from reaching (check always True)
     # we inspect the internal object manually to ensure it works.
     v = Shape(Any)
     assert v.rows.describe() == "any"

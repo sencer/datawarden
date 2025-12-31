@@ -4,17 +4,26 @@ from __future__ import annotations
 
 import copy
 from enum import IntEnum
-from typing import Annotated, override
+from typing import Annotated, Any, cast, override
+
+import numpy as np
+import pandas as pd
 
 # Validated alias for Annotated - the main type hint for validated parameters
 Validated = Annotated
+
+# Type aliases for pandas types
+PandasData = pd.Series | pd.DataFrame | pd.Index
+
+# Type alias for vectorized validation results (mask or scalar True)
+VectorizedResult = pd.Series | pd.DataFrame | bool | Any
 
 
 class Priority(IntEnum):
   """Execution priority for validators (lower runs earlier)."""
 
   STRUCTURAL = 0  # O(1) or O(columns) - Shape, existence checks
-  VECTORIZED = 10  # O(N) numpy - Finite, NonNaN, Simple comparisons
+  VECTORIZED = 10  # O(N) numpy - Finite, NotNaN, Simple comparisons
   COMPLEX = 20  # O(N) or O(N log N) - Monotonicity, Index checks, Gaps
   DEFAULT = 50  # Unknown/User-defined
   SLOW = 100  # O(N) Python loops - Rows validation
@@ -54,6 +63,31 @@ class Validator[T]:
     should not modify data.
     """
     pass
+
+  def describe(self) -> str:
+    """Return a descriptive string for the validator."""
+    return self.__class__.__name__
+
+  def negate(self) -> Validator[T] | None:
+    """Return an optimized negated version of this validator, or None.
+
+    If a validator knows its logical negation (e.g., Positive -> NonPositive),
+    it can return that here. The Not() wrapper will use this instead of
+    doing bitwise mask inversion, which is faster.
+
+    Returns None if no optimized negation is available.
+    """
+    return None
+
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Validate all values in vectorized data (Series, DataFrame, or Index).
+
+    Returns a boolean mask (or scalar True).
+    Raises NotImplementedError if vectorization is not supported.
+    """
+    raise NotImplementedError(
+      f"Validator {self.__class__.__name__} does not support vectorization"
+    )
 
   @override
   def __eq__(self, other: object) -> bool:
@@ -95,6 +129,38 @@ class CompoundValidator[T](Validator[T]):
 
   @override
   def validate(self, data: T) -> None:
+    # 1. OPTIMIZED PATH (Vectorized Fusion)
+    # Try to validate all at once using boolean logic.
+    if isinstance(data, (pd.Series, pd.DataFrame, pd.Index)):
+      try:
+        # This method raises NotImplementedError if any child lacks vectorization support
+        mask = self.validate_vectorized(data)
+
+        # Handle mask checks (True scalar or array-like)
+        if hasattr(mask, "all"):
+          # Use values.all() or np.all() to handle DataFrame masks
+          if isinstance(mask, (pd.DataFrame, pd.Series)):
+            if cast("Any", mask.values).all():
+              return  # Success
+          elif cast("Any", mask).all():
+            return  # Success
+        elif mask is True:
+          return
+
+      except (NotImplementedError, AttributeError, TypeError):
+        # Fallback if vectorization not supported
+        pass
+    elif hasattr(data, "values") and isinstance(
+      getattr(data, "values", None), (np.ndarray, pd.Series, pd.DataFrame, pd.Index)
+    ):
+      # Handle other array-like types if necessary, or just fall through
+      pass
+
+    # 2. SLOW / FALLBACK PATH
+    # Run sequentially. This happens if:
+    # a) Vectorization not supported
+    # b) Validation failed (mask had some False). We re-run to let individual validators
+    #    report their specific errors with nice messages.
     for v in self.validators:
       v.validate(data)
 
@@ -102,3 +168,38 @@ class CompoundValidator[T](Validator[T]):
   def __repr__(self) -> str:
     inner = ", ".join(repr(v) for v in self.validators)
     return f"CompoundValidator([{inner}])"
+
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Validate all validators in the group using vectorized operations.
+
+    Returns:
+      A boolean mask where True means all validators passed.
+
+    Raises:
+      NotImplementedError: If any child validator does not support vectorization.
+    """
+    if not self.validators:
+      # No validators = always valid? Or error?
+      # Assuming mostly panda objects, returning True scalar or array?
+      # Return True scalar which works in broadcasting.
+      return True
+
+    final_mask = None
+
+    for v in self.validators:
+      # We rely on dynamic protocol check.
+      # If any validator doesn't support it, we must fail so the caller (IgnoringNaNs or Plan)
+      # falls back to safe sequential validation.
+      if not hasattr(v, "validate_vectorized"):
+        raise NotImplementedError(f"Validator {v} does not support vectorization")
+
+      mask = cast("Any", v).validate_vectorized(data)
+
+      if final_mask is None:
+        final_mask = mask
+      else:
+        # Combine with BITWISE AND
+        final_mask &= mask
+
+    return cast("VectorizedResult", final_mask)

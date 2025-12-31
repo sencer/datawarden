@@ -12,14 +12,15 @@ if TYPE_CHECKING:
 from datawarden.domain import ValidationDomain
 from datawarden.exceptions import LogicError
 from datawarden.validators.comparison import Ge, Gt, Le, Lt
+from datawarden.validators.logic import Not
 from datawarden.validators.value import (
   AllowInf,
   AllowNaN,
   Between,
   Finite,
   IgnoringNaNs,
-  NonNaN,
-  NonNegative,
+  IsNaN,
+  Negative,
   OneOf,
   Positive,
   StrictFinite,
@@ -44,15 +45,15 @@ def is_domain_validator(
       OneOf,
       Finite,
       StrictFinite,
-      NonNaN,
+      IsNaN,
       IgnoringNaNs,
       AllowNaN,
       AllowInf,
       Between,
-      NonNegative,
       Positive,
+      Negative,
     ),
-  )
+  ) or (isinstance(v, Not) and isinstance(v.wrapped, (Negative, Positive, IsNaN)))
 
 
 def resolve_domains(

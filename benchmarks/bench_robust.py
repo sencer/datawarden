@@ -24,9 +24,12 @@ from datawarden import (
   Finite,
   Ge,
   HasColumn,
+  IgnoringNaNs,
   Index,
   MonoUp,
-  NonNaN,
+  Negative,
+  Not,
+  NotIsNaN,
   Positive,
   Validated,
   validate,
@@ -166,12 +169,12 @@ def run_all_benchmarks():
     return data.sum()
 
   @validate
-  def validated_df_global(data: Validated[pd.DataFrame, Finite, NonNaN]):
+  def validated_df_global(data: Validated[pd.DataFrame, Finite, NotIsNaN]):
     return True
 
   @validate
   def validated_df_local(
-    data: Validated[pd.DataFrame, Finite, NonNaN, HasColumn("a", Ge(0))],
+    data: Validated[pd.DataFrame, Finite, NotIsNaN, HasColumn("a", Ge(0))],
   ):
     return True
 
@@ -181,8 +184,32 @@ def run_all_benchmarks():
   ) -> bool:
     return True
 
+  @validate
+  def validated_not_negative(data: Validated[pd.Series, Not(Negative)]) -> float:
+    return data.sum()
+
+  @validate
+  def validated_ignoring_nans(
+    data: Validated[pd.Series, IgnoringNaNs(Positive)],
+  ) -> float:
+    return data.sum()
+
+  @validate
+  def validated_not_positive(data: Validated[pd.Series, Not(Positive)]) -> float:
+    return data.sum()
+
+  # Data with NaN for IgnoringNaNs tests
+  data_with_nan = pd.Series(np.random.rand(1000))
+  data_with_nan.iloc[::10] = np.nan  # Every 10th element is NaN
+
+  # Data for Not(Negative) - all positive
+  data_positive = pd.Series(np.abs(np.random.rand(1000)) + 0.1)
+
+  # Data for Not(Positive) - all non-positive
+  data_non_positive = pd.Series(-np.abs(np.random.rand(1000)))
+
   # --- SECTION 1: DECORATOR OVERHEAD ---
-  print("\n[1/5] DECORATOR OVERHEAD (Small Data)")
+  print("\n[1/6] DECORATOR OVERHEAD (Small Data)")
 
   benchmark("Plain Function Call", lambda: plain_func(small_data))
   benchmark(
@@ -203,13 +230,13 @@ def run_all_benchmarks():
   benchmark("Index + Data Validators", lambda: validated_index(datetime_data))
 
   # --- SECTION 3: DATA SIZE SCALING ---
-  print("\n[3/5] DATA SIZE SCALING (Series)")
+  print("\n[3/6] DATA SIZE SCALING (Series)")
 
   benchmark("Series: 100 rows", lambda: validated_simple(small_data))
   benchmark("Series: 10k rows", lambda: validated_simple(large_data))
 
   # --- SECTION 4: DATAFRAME PATTERNS ---
-  print("\n[4/5] DATAFRAME PATTERNS")
+  print("\n[4/6] DATAFRAME PATTERNS")
 
   benchmark("DF Global (100k×5, all numeric)", lambda: validated_df_global(df_medium))
   benchmark("DF Local (100k×5, column override)", lambda: validated_df_local(df_medium))
@@ -221,8 +248,29 @@ def run_all_benchmarks():
     iterations=50,
   )
 
-  # --- SECTION 5: OVERHEAD COMPARISON ---
-  print("\n[5/5] OVERHEAD MEASUREMENTS (A vs B)")
+  # --- SECTION 5: NOT & IGNORINGNANS WRAPPERS ---
+  print("\n[5/6] NOT & IGNORINGNANS WRAPPERS (1k rows)")
+
+  benchmark(
+    "Not(Negative) on positive data", lambda: validated_not_negative(data_positive)
+  )
+  benchmark(
+    "Not(Positive) on non-positive data",
+    lambda: validated_not_positive(data_non_positive),
+  )
+  benchmark(
+    "IgnoringNaNs(Positive) with 10% NaN",
+    lambda: validated_ignoring_nans(data_with_nan),
+  )
+
+  compare(
+    "Positive vs Not(Negative)",
+    lambda: validated_multiple(data_positive),
+    lambda: validated_not_negative(data_positive),
+  )
+
+  # --- SECTION 6: OVERHEAD COMPARISON ---
+  print("\n[6/6] OVERHEAD MEASUREMENTS (A vs B)")
 
   compare(
     "Decorator overhead: Raw → @validate",

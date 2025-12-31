@@ -30,7 +30,7 @@ class Datetime(Validator[pd.Series | pd.Index]):
     ```
   """
 
-  priority = Priority.COMPLEX
+  priority = Priority.VECTORIZED
 
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
@@ -51,7 +51,7 @@ class Unique(Validator[pd.Series | pd.Index]):
   Can be applied directly to pd.Index or pd.Series values.
   """
 
-  priority = Priority.COMPLEX
+  priority = Priority.VECTORIZED
   is_chunkable = False
 
   @override
@@ -72,10 +72,10 @@ class MonoUp(Validator[pd.Series | pd.Index]):
   Use with Index(MonoUp) to apply to Series/DataFrame index.
   Can be applied directly to pd.Index or pd.Series values.
 
-  Priority: 20 (Complex Vectorized).
+  Priority: 10 (Vectorized).
   """
 
-  priority = Priority.COMPLEX
+  priority = Priority.VECTORIZED
 
   def __init__(self) -> None:
     super().__init__()
@@ -119,10 +119,10 @@ class MonoDown(Validator[pd.Series | pd.Index]):
   Use with Index(MonoDown) to apply to Series/DataFrame index.
   Can be applied directly to pd.Index or pd.Series values.
 
-  Priority: 20 (Complex Vectorized).
+  Priority: 10 (Vectorized).
   """
 
-  priority = Priority.COMPLEX
+  priority = Priority.VECTORIZED
 
   def __init__(self) -> None:
     super().__init__()
@@ -170,7 +170,7 @@ class Index(Validator[pd.Series | pd.DataFrame | pd.Index]):
     - Index(Datetime, MonoUp) - Check both
     ```
 
-  Priority: 20 (Complex Vectorized) - Runs after simple checks but before slow holistic checks.
+  Priority: 10 (Vectorized) - Runs after structural checks but before slower checks.
   """
 
   priority = Priority.COMPLEX
@@ -187,6 +187,12 @@ class Index(Validator[pd.Series | pd.DataFrame | pd.Index]):
         instantiated.append(v)
     self.validators = tuple(instantiated)
     self.is_chunkable = all(v.is_chunkable for v in instantiated)
+
+    # Dynamic Priority: Runs at the level of its slowest child
+    self.priority = max(
+      Priority.VECTORIZED,
+      *(v.priority for v in instantiated),
+    )
 
   @override
   def reset(self) -> None:
