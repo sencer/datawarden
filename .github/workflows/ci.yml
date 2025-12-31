@@ -49,10 +49,8 @@ jobs:
         source .venv/bin/activate
         pytest --cov=src --cov-report=xml --cov-report=term-missing
 
-    - name: Check for performance regressions
-      run: |
-        source .venv/bin/activate
-        python benchmarks/check_regression.py
+    - name: Performance Regression Check
+      run: python benchmarks/benchmark.py --ci
 
   scan:
     name: Vulnerability Scan
