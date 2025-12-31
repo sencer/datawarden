@@ -2,6 +2,8 @@
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportCallIssue=false, reportArgumentType=false
 
+from typing import Annotated
+
 from loguru import logger
 import numpy as np
 import pandas as pd
@@ -794,3 +796,21 @@ def test_decorator_slow_path_varkwargs():
   invalid = pd.Series([np.inf])
   with pytest.raises(ValueError, match="must be finite"):
     func(invalid, foo="bar")
+
+
+def test_validator_reset_between_calls():
+  """Stateful validators like MonoUp must be reset between decorator calls."""
+
+  @validate
+  def sort_check(data: Annotated[pd.Series, MonoUp]):
+    return data
+
+  # First call: sets internal state _last_val to 3
+  sort_check(pd.Series([1, 2, 3]))
+
+  # Second call: if NOT reset, would compare 1 with 3 and raise ValueError.
+  # It should pass because the validator is reset.
+  try:
+    sort_check(pd.Series([1, 2, 3]))
+  except ValueError as e:
+    pytest.fail(f"Validator was not reset between calls: {e}")

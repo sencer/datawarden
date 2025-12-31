@@ -23,18 +23,6 @@ from datawarden.utils import get_chunks, is_numeric
 _shared_executor: concurrent.futures.ThreadPoolExecutor | None = None
 
 
-def _reset_validators(item: Any) -> None:
-  """Recursively reset all validators in a plan or list."""
-  if isinstance(item, list):
-    for v in item:
-      _reset_validators(v)
-  elif isinstance(item, dict):
-    for val in item.values():
-      _reset_validators(val)
-  elif hasattr(item, "reset"):
-    item.reset()
-
-
 def _get_executor() -> concurrent.futures.ThreadPoolExecutor:
   """Get or create the shared thread pool executor (lazy initialization)."""
   global _shared_executor

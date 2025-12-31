@@ -57,6 +57,19 @@ class TestFinite:
     with pytest.raises(TypeError, match="requires pandas"):
       validator.validate(42)
 
+  def test_finite_on_string_series(self):
+    """Finite should raise TypeError when applied to non-numeric Series."""
+    v = Finite()
+    s = pd.Series(["a", "b"])
+    with pytest.raises(TypeError, match="numeric"):
+      v.validate(s)
+
+  def test_finite_on_mixed_df(self):
+    """Finite should ignore non-numeric columns in DataFrames."""
+    v = Finite()
+    df = pd.DataFrame({"a": [1.0, 2.0], "b": ["x", "y"]})
+    v.validate(df)
+
 
 class TestStrictFinite:
   """Tests for StrictFinite validator (rejects both Inf and NaN)."""
@@ -94,3 +107,16 @@ class TestStrictFinite:
     validator = StrictFinite()
     with pytest.raises(ValueError, match="must be finite"):
       validator.validate(data)
+
+  def test_strict_finite_on_string_series(self):
+    """StrictFinite should raise TypeError when applied to non-numeric Series."""
+    v = StrictFinite()
+    s = pd.Series(["a", "b"])
+    with pytest.raises(TypeError, match="numeric"):
+      v.validate(s)
+
+  def test_strict_finite_on_mixed_df(self):
+    """StrictFinite should ignore non-numeric columns in DataFrames."""
+    v = StrictFinite()
+    df = pd.DataFrame({"a": [1.0, 2.0], "b": ["x", "y"]})
+    v.validate(df)
