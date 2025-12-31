@@ -496,7 +496,8 @@ class Positive(Validator[pd.Series | pd.DataFrame | pd.Index]):
       vals = data
       error_data = data
     else:
-      return
+      vals = data
+      error_data = data
 
     if not self.ignore_nan and scalar_any(mask_nan := pd.isna(vals)):
       report_failures(
@@ -567,7 +568,8 @@ class Negative(Validator[pd.Series | pd.DataFrame | pd.Index]):
       vals = data
       error_data = data
     else:
-      return
+      vals = data
+      error_data = data
 
     if not self.ignore_nan and scalar_any(mask_nan := pd.isna(vals)):
       report_failures(
@@ -671,7 +673,8 @@ class Between(Validator[pd.Series | pd.DataFrame | pd.Index]):
       vals = data
       error_data = data
     else:
-      return
+      vals = data
+      error_data = data
 
     # Check for NaN values first
     if not self.ignore_nan and scalar_any(mask_nan := pd.isna(vals)):
@@ -794,6 +797,18 @@ class Outside(Validator[pd.Series | pd.DataFrame | pd.Index]):
           np.logical_not(mask),
           f"Data must be outside [{self.lower}, {self.upper}]",
         )
+    else:
+      vals = data
+      lower_fail = (vals >= self.lower) if self.lower_exclusive else (vals > self.lower)
+      upper_fail = (vals <= self.upper) if self.upper_exclusive else (vals < self.upper)
+
+      is_invalid = lower_fail and upper_fail
+
+      if self.ignore_nan and pd.isna(vals):
+        is_invalid = False
+
+      if is_invalid:
+        raise ValueError(f"Data must be outside [{self.lower}, {self.upper}]")
 
   @override
   def validate_vectorized(self, data: PandasData) -> VectorizedResult:

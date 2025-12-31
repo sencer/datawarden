@@ -78,9 +78,11 @@ class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
           raise ValueError(f"Missing columns for comparison: {missing}")
 
         vals_to_check = data[relevant_cols].values
+      # Unary mode or Series/Index: check all values
+      elif isinstance(data, (pd.Series, pd.DataFrame)):
+        vals_to_check = data.values
       else:
-        # Unary mode or Series/Index: check all values
-        vals_to_check = data if isinstance(data, pd.Index) else data.values
+        vals_to_check = data
 
       if np.any(mask_nan := pd.isna(vals_to_check)):
         report_failures(
@@ -99,6 +101,9 @@ class _ComparisonValidator(Validator[pd.Series | pd.DataFrame | pd.Index]):
           report_failures(
             data, cast("Any", mask), f"Data must be {self.op_symbol} {target}"
           )
+      # Scalar check
+      elif (self.opposite_op_func)(data, target):
+        raise ValueError(f"Data must be {self.op_symbol} {target}")
     else:
       # Column comparison: col1 op col2 op col3 ...
       if not isinstance(data, pd.DataFrame):
