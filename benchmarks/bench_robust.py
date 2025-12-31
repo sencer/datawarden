@@ -1,8 +1,19 @@
-"""Consolidated benchmark script for datawarden performance."""
+"""Robust micro-benchmark suite for datawarden.
 
+Design principles for micro-optimization validation:
+1. Use MIN time (not median) - represents true cost without interference
+2. High iteration count to amortize measurement overhead
+3. Multiple trials with warmup to reach steady state
+4. Report both min and stdev to gauge stability
+5. Side-by-side comparison in same process to reduce variance
+"""
+
+# ruff: noqa: PLR2004, RUF001, ARG001, F841
 # pyright: reportCallIssue=false, reportArgumentType=false
+
+from collections.abc import Callable
+import statistics
 import time
-import timeit
 from typing import Any
 
 import numpy as np
@@ -11,6 +22,7 @@ import pandas as pd
 from datawarden import (
   Datetime,
   Finite,
+  Ge,
   HasColumn,
   Index,
   MonoUp,
@@ -20,171 +32,230 @@ from datawarden import (
   validate,
 )
 
-# =============================================================================
-# Setup Test Data
-# =============================================================================
-small_data = pd.Series(np.random.rand(100))
-large_data = pd.Series(np.random.rand(10000))
-datetime_data = pd.Series(
-  np.random.rand(1000), index=pd.date_range("2024-01-01", periods=1000)
-)
-
-# Dataframes for scaling and parallel benchmarks
-df_small = pd.DataFrame({"a": np.random.rand(100), "b": np.random.rand(100)})
-df_parallel1 = pd.DataFrame(np.random.uniform(0, 10, size=(500_000, 5)))
-df_parallel2 = pd.DataFrame(np.random.uniform(0, 10, size=(500_000, 5)))
+# Configuration
+TRIALS = 10
+ITERATIONS = 5_000
 
 
-# =============================================================================
-# Test Functions
-# =============================================================================
-def plain(data: pd.Series) -> float:
-  return data.sum()
+def time_ns(func: Callable[[], Any], iterations: int) -> float:
+  """Run iterations and return total time in nanoseconds."""
+  start = time.perf_counter_ns()
+  for _ in range(iterations):
+    func()
+  return time.perf_counter_ns() - start
 
 
-@validate
-def decorated_simple(data: Validated[pd.Series, Finite]) -> float:
-  return data.sum()
-
-
-@validate
-def decorated_multiple(data: Validated[pd.Series, Finite, Positive]) -> float:
-  return data.sum()
-
-
-@validate
-def decorated_index(
-  data: Validated[pd.Series, Index(Datetime, MonoUp), Finite],
-) -> float:
-  return data.sum()
-
-
-@validate
-def parallel_func(
-  a: Validated[pd.DataFrame, Finite], b: Validated[pd.DataFrame, Finite]
-) -> bool:
-  _ = a
-  _ = b
-  return True
-
-
-# =============================================================================
-# Helpers
-# =============================================================================
-def run_overhead_bench(
-  func: Any,
-  data: Any,
-  skip_val: bool | None,
-  iterations: int,
-) -> float:
-  if skip_val is None:
-    return timeit.timeit(lambda: func(data), number=iterations)
-  return timeit.timeit(lambda: func(data, skip_validation=skip_val), number=iterations)
-
-
-def format_us(seconds: float, iterations: int) -> str:
-  return f"{(seconds / iterations) * 1_000_000:6.2f} us"
-
-
-# =============================================================================
-# Main Benchmark Logic
-# =============================================================================
-def main() -> None:
-  iterations = 10000
-  print("=" * 80)
-  print("DataWarden Robust Benchmark".center(80))
-  print("=" * 80)
-
-  # 1. Decorator Overhead
-  print(f"\n1. Decorator Overhead ({iterations:,} iterations)")
-  print("-" * 80)
-  header = (
-    f"{'Scenario':<40} | {'Baseline':<12} | {'Skip=True':<12} | {'Skip=False':<12}"
-  )
-  print(header)
-  print("-" * 80)
-
-  scenarios = [
-    ("Small Series (100 elements)", decorated_simple, small_data),
-    ("Large Series (10,000 elements)", decorated_simple, large_data),
-    ("Multiple Validators (Finite+Positive)", decorated_multiple, small_data),
-    ("Index Validators (Datetime+MonoUp)", decorated_index, datetime_data),
-  ]
-
-  for name, func, data in scenarios:
-    t_plain = run_overhead_bench(plain, data, None, iterations)
-    t_skip = run_overhead_bench(func, data, True, iterations)
-    t_val = run_overhead_bench(func, data, False, iterations)
-
-    print(
-      f"{name:<40} | "
-      f"{format_us(t_plain, iterations):<12} | "
-      f"{format_us(t_skip, iterations):<12} | "
-      f"{format_us(t_val, iterations):<12}"
-    )
-
-  # 2. Parallel Validation
-  print("\n2. Parallel Validation (Multiple Large DataFrames)")
-  print("-" * 80)
-  n_parallel = 10
+def benchmark(
+  name: str,
+  func: Callable[[], Any],
+  trials: int = TRIALS,
+  iterations: int = ITERATIONS,
+) -> tuple[float, float]:
+  """Run benchmark with warmup, return (min_ns_per_call, stdev_ns_per_call)."""
   # Warmup
-  parallel_func(df_parallel1, df_parallel2)
-  t_parallel = timeit.timeit(
-    lambda: parallel_func(df_parallel1, df_parallel2), number=n_parallel
-  )
-  print(f"Parallel @validate (2x 500k rows, 5 cols) x {n_parallel}: {t_parallel:.4f}s")
-  print(f"Average time per call: {(t_parallel / n_parallel) * 1000:.2f}ms")
+  time_ns(func, iterations // 5)
 
-  # 3. Data Scaling
-  print("\n3. Data Scaling (Global vs Local)")
-  print("-" * 80)
+  results_ns = []
+  for _ in range(trials):
+    total_ns = time_ns(func, iterations)
+    results_ns.append(total_ns / iterations)
+    print(".", end="", flush=True)
 
-  @validate
-  def validate_series(data: Validated[pd.Series, Finite, NonNaN]):
-    return data.sum()
+  min_ns = min(results_ns)
+  stdev_ns = statistics.stdev(results_ns) if len(results_ns) > 1 else 0.0
 
-  @validate
-  def validate_df_global(data: Validated[pd.DataFrame, Finite, NonNaN]):
-    return data.sum()
+  # Format appropriately (ns, us, or ms)
+  if min_ns >= 1_000_000:
+    min_fmt = f"{min_ns / 1_000_000:7.2f}ms"
+    std_fmt = f"{stdev_ns / 1_000_000:5.2f}ms"
+  elif min_ns >= 1_000:
+    min_fmt = f"{min_ns / 1_000:7.2f}µs"
+    std_fmt = f"{stdev_ns / 1_000:5.2f}µs"
+  else:
+    min_fmt = f"{min_ns:7.1f}ns"
+    std_fmt = f"{stdev_ns:5.1f}ns"
 
-  @validate
-  def validate_df_local(data: Validated[pd.DataFrame, HasColumn("a", Finite, NonNaN)]):
-    return data["a"].sum()
+  print(f"\r{name:<45} | Min: {min_fmt} | Stdev: {std_fmt}")
 
-  sizes = [10_000, 100_000, 1_000_000]
+  return min_ns, stdev_ns
+
+
+def compare(
+  name: str,
+  baseline: Callable[[], Any],
+  optimized: Callable[[], Any],
+  trials: int = TRIALS,
+  iterations: int = ITERATIONS,
+) -> None:
+  """Compare two implementations side-by-side, report speedup."""
+  # Interleaved warmup
+  time_ns(baseline, iterations // 5)
+  time_ns(optimized, iterations // 5)
+
+  baseline_results = []
+  optimized_results = []
+
+  # Interleave trials to reduce systematic bias
+  for _ in range(trials):
+    baseline_results.append(time_ns(baseline, iterations) / iterations)
+    optimized_results.append(time_ns(optimized, iterations) / iterations)
+    print(".", end="", flush=True)
+
+  base_min = min(baseline_results)
+  opt_min = min(optimized_results)
+  speedup = (base_min - opt_min) / base_min * 100 if base_min > 0 else 0
+
+  indicator = "✓" if speedup > 5 else ("✗" if speedup < -5 else "=")
+
+  # Format appropriately
+  if base_min >= 1_000_000:
+    base_fmt = f"{base_min / 1_000_000:6.2f}ms"
+    opt_fmt = f"{opt_min / 1_000_000:6.2f}ms"
+  elif base_min >= 1_000:
+    base_fmt = f"{base_min / 1_000:6.2f}µs"
+    opt_fmt = f"{opt_min / 1_000:6.2f}µs"
+  else:
+    base_fmt = f"{base_min:6.1f}ns"
+    opt_fmt = f"{opt_min:6.1f}ns"
+
   print(
-    f"{'Rows':>12} | {'Series (ms)':>15} | {'DF Global (ms)':>18} | {'DF Local (ms)':>18}"
+    f"\r{name:<45} | Base: {base_fmt} | Opt: {opt_fmt} | {speedup:+5.1f}% {indicator}"
   )
-  print("-" * 80)
 
-  for n in sizes:
-    s = pd.Series(np.random.randn(n))
-    df = pd.DataFrame({"a": np.random.rand(n), "b": np.random.randn(n)})
 
-    # Warmup
-    validate_series(s[:100])
-    validate_df_global(df[:100])
-    validate_df_local(df[:100])
+def run_all_benchmarks():
+  print("=" * 85)
+  print("DATAWARDEN MICRO-BENCHMARK SUITE".center(85))
+  print(f"Method: MIN of {TRIALS} trials × {ITERATIONS:,} iterations".center(85))
+  print("=" * 85)
 
-    # Series
-    start = time.perf_counter()
-    validate_series(s)
-    t_series = (time.perf_counter() - start) * 1000
+  # =============================================================================
+  # Setup Test Data
+  # =============================================================================
+  small_data = pd.Series(np.random.rand(100))
+  large_data = pd.Series(np.random.rand(10_000))
+  datetime_data = pd.Series(
+    np.random.rand(1000), index=pd.date_range("2024-01-01", periods=1000)
+  )
 
-    # DF Global (Promoted)
-    start = time.perf_counter()
-    validate_df_global(df)
-    t_global = (time.perf_counter() - start) * 1000
+  # DataFrames for various tests
+  df_small = pd.DataFrame({"a": np.random.rand(100), "b": np.random.rand(100)})
+  df_medium = pd.DataFrame({"a": np.random.rand(100_000), "b": np.random.rand(100_000)})
+  df_large = pd.DataFrame({
+    f"c{i}": np.random.uniform(0, 10, 500_000) for i in range(5)
+  })
 
-    # DF Local (Column-wise)
-    start = time.perf_counter()
-    validate_df_local(df)
-    t_local = (time.perf_counter() - start) * 1000
+  # =============================================================================
+  # Define Test Functions
+  # =============================================================================
+  def plain_func(data: pd.Series) -> float:
+    return data.sum()
 
-    print(f"{n:12,d} | {t_series:15.2f} | {t_global:18.2f} | {t_local:18.2f}")
+  @validate
+  def validated_simple(data: Validated[pd.Series, Finite]) -> float:
+    return data.sum()
 
-  print("\n" + "=" * 80)
+  @validate
+  def validated_multiple(data: Validated[pd.Series, Finite, Positive]) -> float:
+    return data.sum()
+
+  @validate
+  def validated_index(
+    data: Validated[pd.Series, Index(Datetime, MonoUp), Finite],
+  ) -> float:
+    return data.sum()
+
+  @validate
+  def validated_df_global(data: Validated[pd.DataFrame, Finite, NonNaN]):
+    return True
+
+  @validate
+  def validated_df_local(
+    data: Validated[pd.DataFrame, Finite, NonNaN, HasColumn("a", Ge(0))],
+  ):
+    return True
+
+  @validate
+  def parallel_func(
+    a: Validated[pd.DataFrame, Finite], b: Validated[pd.DataFrame, Finite]
+  ) -> bool:
+    return True
+
+  # --- SECTION 1: DECORATOR OVERHEAD ---
+  print("\n[1/5] DECORATOR OVERHEAD (Small Data)")
+
+  benchmark("Plain Function Call", lambda: plain_func(small_data))
+  benchmark(
+    "@validate (Skip=True)", lambda: validated_simple(small_data, skip_validation=True)
+  )
+  benchmark(
+    "@validate (Skip=False)",
+    lambda: validated_simple(small_data, skip_validation=False),
+  )
+
+  # --- SECTION 2: VALIDATOR STACKING ---
+  print("\n[2/5] VALIDATOR STACKING")
+
+  benchmark("Single Validator (Finite)", lambda: validated_simple(small_data))
+  benchmark(
+    "Multiple Validators (Finite+Positive)", lambda: validated_multiple(small_data)
+  )
+  benchmark("Index + Data Validators", lambda: validated_index(datetime_data))
+
+  # --- SECTION 3: DATA SIZE SCALING ---
+  print("\n[3/5] DATA SIZE SCALING (Series)")
+
+  benchmark("Series: 100 rows", lambda: validated_simple(small_data))
+  benchmark("Series: 10k rows", lambda: validated_simple(large_data))
+
+  # --- SECTION 4: DATAFRAME PATTERNS ---
+  print("\n[4/5] DATAFRAME PATTERNS")
+
+  benchmark("DF Global (100k×5, all numeric)", lambda: validated_df_global(df_medium))
+  benchmark("DF Local (100k×5, column override)", lambda: validated_df_local(df_medium))
+
+  # For parallel, use fewer iterations (heavy operation)
+  benchmark(
+    "Parallel (2× 500k×5)",
+    lambda: parallel_func(df_large, df_large),
+    iterations=50,
+  )
+
+  # --- SECTION 5: OVERHEAD COMPARISON ---
+  print("\n[5/5] OVERHEAD MEASUREMENTS (A vs B)")
+
+  compare(
+    "Decorator overhead: Raw → @validate",
+    lambda: plain_func(small_data),
+    lambda: validated_simple(small_data),
+  )
+
+  compare(
+    "Skip flag overhead: Skip=True → False",
+    lambda: validated_simple(small_data, skip_validation=True),
+    lambda: validated_simple(small_data, skip_validation=False),
+  )
+
+  compare(
+    "Data scaling: Series 100 → 10k rows",
+    lambda: validated_simple(small_data),
+    lambda: validated_simple(large_data),
+  )
+
+  compare(
+    "DF pattern: Global → Local override",
+    lambda: validated_df_global(df_medium),
+    lambda: validated_df_local(df_medium),
+  )
+
+  print("\n" + "=" * 85)
+  print(
+    "Overhead = (B - A) / A × 100%  |  ✓ B faster  |  = similar  |  ✗ B slower".center(
+      85
+    )
+  )
+  print("=" * 85)
 
 
 if __name__ == "__main__":
-  main()
+  run_all_benchmarks()
