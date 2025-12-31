@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, Any, cast, override
 
 if TYPE_CHECKING:
   from collections.abc import Callable
@@ -14,6 +14,12 @@ from datawarden.base import (
   Priority,
   Validator,
 )
+
+if TYPE_CHECKING:
+  from datawarden.base import (
+    PandasData,
+    VectorizedResult,
+  )
 from datawarden.protocols import MetaValidator, ScalarConstraint
 from datawarden.utils import (
   NUMERIC_KINDS,
@@ -22,9 +28,7 @@ from datawarden.utils import (
   scalar_any,
 )
 from datawarden.validators.columns import HasColumn, HasColumns
-
-# Type alias for pandas types
-PandasData = pd.Series | pd.DataFrame | pd.Index
+from datawarden.validators.logic import Not
 
 
 def _require_pandas(data: object, validator_name: str) -> PandasData:
@@ -151,14 +155,26 @@ class IgnoringNaNs(Validator[pd.Series | pd.DataFrame | pd.Index], MetaValidator
       return
 
     if isinstance(data, pd.Series):
-      # Filter out NaNs, validate the rest
-      mask = ~pd.isna(data)
-      if not mask.any():
-        return  # All NaN, nothing to validate
+      # If the wrapped validator has a vectorized validation method, use it.
+      # This is an optimization for validators that can handle masks directly.
+      try:
+        validity_mask = cast("Any", self.wrapped).validate_vectorized(data)
+        nan_mask = pd.isna(data)
 
-      # Validate non-NaN subset
-      filtered = data[mask]
-      self.wrapped.validate(filtered)
+        # Combine masks: A value is invalid if it's NOT NaN AND the wrapped validator says it's invalid.
+        # (True = invalid)
+        combined_invalid_mask = ~nan_mask & ~validity_mask
+
+        if combined_invalid_mask.any():
+          # Re-run on the non-NaN subset to let the wrapped validator report its specific error message
+          self.wrapped.validate(data[~nan_mask])
+      except (NotImplementedError, AttributeError):
+        # Fallback to filtering out NaNs and validating the rest
+        # (This handles validators that haven't implemented vectorized validation)
+        mask_not_nan = ~pd.isna(data)
+        if mask_not_nan.any():
+          self.wrapped.validate(data[mask_not_nan])
+        return
 
     elif isinstance(data, pd.DataFrame):
       # Holistic validators that require the whole DataFrame should not be run column-wise.
@@ -181,6 +197,26 @@ class IgnoringNaNs(Validator[pd.Series | pd.DataFrame | pd.Index], MetaValidator
         # Preserve Index type when filtering
         filtered = data[mask]
         self.wrapped.validate(filtered)
+
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Validate only non-NaN values."""
+    if self.wrapped is None:
+      return np.ones(len(data), dtype=bool)
+
+    if hasattr(self.wrapped, "validate_vectorized"):
+      # Only attempted if wrapped validator implements the protocol explicitly
+      validity_mask = cast("Any", self.wrapped).validate_vectorized(data)
+    else:
+      raise NotImplementedError(
+        f"Wrapped validator {self.wrapped} in IgnoringNaNs does not support vectorization"
+      )
+
+    # 2. Get NaN mask (True = NaN)
+    nan_mask = pd.isna(data)
+
+    # Combine: valid if (wrapped says valid) OR (is NaN)
+    return validity_mask | nan_mask
 
 
 class AllowNaN(Validator[pd.Series | pd.DataFrame | pd.Index]):
@@ -275,6 +311,23 @@ class Finite(Validator[pd.Series | pd.DataFrame | pd.Index]):
         f"Finite requires pandas Series, DataFrame, or Index, got {type(data).__name__}"
       )
 
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Return boolean validity mask."""
+    if isinstance(data, pd.DataFrame):
+      mask = pd.DataFrame(True, index=data.index, columns=data.columns)
+      for col in data.columns:
+        if data[col].dtype.kind in NUMERIC_KINDS:
+          mask[col] = self.validate_vectorized(data[col])
+      return mask
+
+    if data.dtype.kind not in NUMERIC_KINDS:
+      return np.ones(len(data), dtype=bool)
+
+    # np.isfinite returns False for NaN, but Finite ALLOWS NaN.
+    # np.isinf(nan) is False. So VALID if NOT isinf.
+    return ~np.isinf(getattr(data, "values", data))
+
 
 class StrictFinite(Validator[pd.Series | pd.DataFrame | pd.Index]):
   """Validator for strictly finite values (no Inf, no NaN).
@@ -330,9 +383,45 @@ class StrictFinite(Validator[pd.Series | pd.DataFrame | pd.Index]):
       if len(data) > 0 and not np.all(mask_finite := np.isfinite(data.values)):
         report_failures(data, ~mask_finite, "Data must be finite (contains NaN or Inf)")
 
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Return boolean validity mask."""
+    if isinstance(data, pd.DataFrame):
+      mask = pd.DataFrame(True, index=data.index, columns=data.columns)
+      for col in data.columns:
+        if data[col].dtype.kind in NUMERIC_KINDS:
+          mask[col] = self.validate_vectorized(data[col])
+      return mask
 
-class NonEmpty(Validator[pd.Series | pd.DataFrame | pd.Index]):
-  """Validator for non-empty data.
+    if data.dtype.kind not in NUMERIC_KINDS:
+      return np.ones(len(data), dtype=bool)
+
+    return np.isfinite(getattr(data, "values", data))
+
+
+class Empty(Validator[pd.Series | pd.DataFrame | pd.Index]):
+  """Validator that ensures data is empty (no rows).
+
+  Priority: 0 (Structural).
+  """
+
+  is_holistic = True
+  priority = 0
+
+  @override
+  def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
+    _require_pandas(data, "Empty")
+    if not data.empty:
+      raise ValueError("Data must be empty")
+
+  @override
+  def negate(self) -> NotEmpty:
+    """Return NotEmpty as the logical negation of Empty."""
+    return NotEmpty()
+
+
+class NotEmpty(Validator[pd.Series | pd.DataFrame | pd.Index]):
+  """Validator for non-empty data (at least one row).
 
   Checks that the data has at least one row. For DataFrames, this is an
   atomic O(1) check.
@@ -345,28 +434,14 @@ class NonEmpty(Validator[pd.Series | pd.DataFrame | pd.Index]):
 
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
-    _require_pandas(data, "NonEmpty")
+    _require_pandas(data, "NotEmpty")
     if data.empty:
-      raise ValueError("Data must not be empty")
-
-
-class NonNaN(Validator[pd.Series | pd.DataFrame | pd.Index]):
-  """Validator for non-NaN values.
-
-  Uses pd.isna() for compatibility with all dtypes including object columns.
-  If used globally on a DataFrame, it validates all columns.
-  """
-
-  is_promotable = True
-  priority = Priority.VECTORIZED
+      raise ValueError("Data must be non-empty")
 
   @override
-  def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
-    _require_pandas(data, "NonNaN")
-    vals = data if isinstance(data, pd.Index) else data.values
-    if scalar_any(pd.isna(vals)):
-      mask = pd.isna(data)  # Keep mask as pandas obj for reporting
-      report_failures(data, mask, "Data must not contain NaN values")
+  def negate(self) -> Empty:
+    """Return Empty as the logical negation of NotEmpty."""
+    return Empty()
 
 
 class NonNegative(Validator[pd.Series | pd.DataFrame | pd.Index]):
@@ -416,6 +491,30 @@ class NonNegative(Validator[pd.Series | pd.DataFrame | pd.Index]):
       mask = vals < 0
       report_failures(error_data, mask, "Data must be non-negative")
 
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Return boolean validity mask."""
+    if isinstance(data, pd.DataFrame):
+      mask = pd.DataFrame(True, index=data.index, columns=data.columns)
+      for col in data.columns:
+        if data[col].dtype.kind in NUMERIC_KINDS:
+          mask[col] = self.validate_vectorized(data[col])
+      return mask
+
+    if data.dtype.kind not in NUMERIC_KINDS:
+      return np.ones(len(data), dtype=bool)
+
+    vals = getattr(data, "values", data)
+    valid_mask = vals >= 0
+    if self.ignore_nan:
+      valid_mask |= pd.isna(vals)
+    return valid_mask
+
+  @override
+  def negate(self) -> Negative:
+    """Return Negative as the logical negation of NonNegative."""
+    return Negative(ignore_nan=self.ignore_nan)
+
 
 class Positive(Validator[pd.Series | pd.DataFrame | pd.Index]):
   """Validator for positive values (> 0).
@@ -462,6 +561,30 @@ class Positive(Validator[pd.Series | pd.DataFrame | pd.Index]):
     if scalar_any(vals <= 0):
       mask = vals <= 0
       report_failures(error_data, mask, "Data must be positive")
+
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Return boolean validity mask."""
+    if isinstance(data, pd.DataFrame):
+      mask = pd.DataFrame(True, index=data.index, columns=data.columns)
+      for col in data.columns:
+        if data[col].dtype.kind in NUMERIC_KINDS:
+          mask[col] = self.validate_vectorized(data[col])
+      return mask
+
+    if data.dtype.kind not in NUMERIC_KINDS:
+      return np.ones(len(data), dtype=bool)
+
+    vals = getattr(data, "values", data)
+    valid_mask = vals > 0
+    if self.ignore_nan:
+      valid_mask |= pd.isna(vals)
+    return valid_mask
+
+  @override
+  def negate(self) -> NonPositive:
+    """Return NonPositive as the logical negation of Positive."""
+    return NonPositive(ignore_nan=self.ignore_nan)
 
 
 class Negative(Validator[pd.Series | pd.DataFrame | pd.Index]):
@@ -510,6 +633,30 @@ class Negative(Validator[pd.Series | pd.DataFrame | pd.Index]):
       mask = vals >= 0
       report_failures(error_data, mask, "Data must be negative")
 
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Return boolean validity mask."""
+    if isinstance(data, pd.DataFrame):
+      mask = pd.DataFrame(True, index=data.index, columns=data.columns)
+      for col in data.columns:
+        if data[col].dtype.kind in NUMERIC_KINDS:
+          mask[col] = self.validate_vectorized(data[col])
+      return mask
+
+    if data.dtype.kind not in NUMERIC_KINDS:
+      return np.ones(len(data), dtype=bool)
+
+    vals = getattr(data, "values", data)
+    valid_mask = vals < 0
+    if self.ignore_nan:
+      valid_mask |= pd.isna(vals)
+    return valid_mask
+
+  @override
+  def negate(self) -> NonNegative:
+    """Return NonNegative as the logical negation of Negative."""
+    return NonNegative(ignore_nan=self.ignore_nan)
+
 
 class NonPositive(Validator[pd.Series | pd.DataFrame | pd.Index]):
   """Validator for non-positive values (<= 0).
@@ -556,6 +703,30 @@ class NonPositive(Validator[pd.Series | pd.DataFrame | pd.Index]):
     if scalar_any(vals > 0):
       mask = vals > 0
       report_failures(error_data, mask, "Data must be non-positive")
+
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Return boolean validity mask."""
+    if isinstance(data, pd.DataFrame):
+      mask = pd.DataFrame(True, index=data.index, columns=data.columns)
+      for col in data.columns:
+        if data[col].dtype.kind in NUMERIC_KINDS:
+          mask[col] = self.validate_vectorized(data[col])
+      return mask
+
+    if data.dtype.kind not in NUMERIC_KINDS:
+      return np.ones(len(data), dtype=bool)
+
+    vals = getattr(data, "values", data)
+    valid_mask = vals <= 0
+    if self.ignore_nan:
+      valid_mask |= pd.isna(vals)
+    return valid_mask
+
+  @override
+  def negate(self) -> Positive:
+    """Return Positive as the logical negation of NonPositive."""
+    return Positive(ignore_nan=self.ignore_nan)
 
 
 class Between(Validator[pd.Series | pd.DataFrame | pd.Index]):
@@ -652,6 +823,139 @@ class Between(Validator[pd.Series | pd.DataFrame | pd.Index]):
       mask = vals >= self.upper
       report_failures(error_data, mask, f"Data must be < {self.upper}")
 
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Return boolean validity mask."""
+    if isinstance(data, pd.DataFrame):
+      # Column-wise check
+      mask = pd.DataFrame(True, index=data.index, columns=data.columns)
+      for col in data.columns:
+        if data[col].dtype.kind in NUMERIC_KINDS:
+          mask[col] = self.validate_vectorized(data[col])
+      return mask
+
+    if data.dtype.kind not in NUMERIC_KINDS:
+      return np.ones(len(data), dtype=bool)
+
+    vals = getattr(data, "values", data)
+    # Lower Check
+    lower_mask = (vals >= self.lower) if self.lower_inclusive else (vals > self.lower)
+    # Upper Check
+    upper_mask = (vals <= self.upper) if self.upper_inclusive else (vals < self.upper)
+
+    valid_mask = lower_mask & upper_mask
+    if self.ignore_nan:
+      valid_mask |= pd.isna(vals)
+    return valid_mask
+
+  @override
+  def negate(self) -> Outside:
+    """Return Outside as the logical negation of Between."""
+    return Outside(
+      self.lower,
+      self.upper,
+      inclusive=(self.lower_inclusive, self.upper_inclusive),
+      ignore_nan=self.ignore_nan,
+    )
+
+
+class Outside(Validator[pd.Series | pd.DataFrame | pd.Index]):
+  """Validator for values outside a range (lower, upper).
+
+  Logical negation of Between.
+  Rejects NaN values by default. Use IgnoringNaNs(Outside(...)) to allow NaN.
+
+  Args:
+    lower: Minimum of the excluded range.
+    upper: Maximum of the excluded range.
+    inclusive: Tuple of (lower_inclusive, upper_inclusive) for the EXCLUDED range.
+               Default (True, True) means [lower, upper] is excluded.
+               If (True, True), validity is (vals < lower) | (vals > upper).
+  """
+
+  is_numeric_only = True
+  is_promotable = True
+  priority = Priority.VECTORIZED
+
+  def __init__(
+    self,
+    lower: float | int,
+    upper: float | int,
+    inclusive: tuple[bool, bool] = (True, True),
+    ignore_nan: bool = False,
+  ) -> None:
+    super().__init__()
+    self.lower = lower
+    self.upper = upper
+    self.lower_exclusive, self.upper_exclusive = inclusive
+    self.ignore_nan = ignore_nan
+
+  @override
+  def __repr__(self) -> str:
+    args = [f"{self.lower!r}", f"{self.upper!r}"]
+    if not (self.lower_exclusive and self.upper_exclusive):
+      args.append(f"inclusive={self.lower_exclusive, self.upper_exclusive!r}")
+    if self.ignore_nan:
+      args.append("ignore_nan=True")
+    return f"Outside({', '.join(args)})"
+
+  @override
+  def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
+    # Values must be outside the range
+    # The vectorized method returns a mask where True means "valid" (outside the range)
+    # So we need to report failures where the mask is False (~mask)
+    if isinstance(data, (pd.Index, pd.Series, pd.DataFrame)):
+      mask = self.validate_vectorized(data)
+      if not np.all(mask):
+        error_data = data
+        if isinstance(data, pd.DataFrame):
+          # Narrow to numeric columns for failure reporting
+          _, error_data = _get_numeric_df_values(data)
+          if error_data is None:
+            return
+
+        report_failures(
+          error_data,
+          np.logical_not(mask),
+          f"Data must be outside [{self.lower}, {self.upper}]",
+        )
+
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Return boolean validity mask."""
+    if isinstance(data, pd.DataFrame):
+      mask = pd.DataFrame(True, index=data.index, columns=data.columns)
+      for col in data.columns:
+        if data[col].dtype.kind in NUMERIC_KINDS:
+          mask[col] = self.validate_vectorized(data[col])
+      return mask
+
+    if data.dtype.kind not in NUMERIC_KINDS:
+      return np.ones(len(data), dtype=bool)
+
+    vals = getattr(data, "values", data)
+    # Invalid if (vals >= lower) AND (vals <= upper) -> depends on inclusive
+    # Valid if (vals < lower) OR (vals > upper) -> depends on exclusive
+    lower_fail = (vals >= self.lower) if self.lower_exclusive else (vals > self.lower)
+    upper_fail = (vals <= self.upper) if self.upper_exclusive else (vals < self.upper)
+
+    invalid_mask = lower_fail & upper_fail
+    valid_mask = np.logical_not(invalid_mask)
+
+    if self.ignore_nan:
+      valid_mask |= pd.isna(vals)
+    return valid_mask
+
+  @override
+  def negate(self) -> Between:
+    """Return Between as the logical negation of Outside."""
+    return Between(
+      self.lower,
+      self.upper,
+      inclusive=(self.lower_exclusive, self.upper_exclusive),
+      ignore_nan=self.ignore_nan,
+    )
+
 
 # =============================================================================
 # Lambda-based Validators
@@ -692,6 +996,17 @@ class Is(Validator[pd.Series | pd.DataFrame | pd.Index]):
     self.predicate = predicate
     self.name = name
     self.is_holistic = True
+
+  @override
+  def describe(self) -> str:
+    """Return a descriptive string for the predicate."""
+    return self.name or "satisfied predicate"
+
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Return boolean validity mask."""
+    # We assume the predicate is vectorized
+    return self.predicate(data)
 
   @override
   def validate(self, data: pd.Series | pd.DataFrame | pd.Index) -> None:
@@ -799,6 +1114,14 @@ class Rows(Validator[pd.DataFrame]):
         f"{msg} ({n_failed} rows failed, e.g. at indices: {failed_indices})"
       )
 
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Return boolean validity mask."""
+    if not isinstance(data, pd.DataFrame):
+      raise TypeError("Rows validator requires a pandas DataFrame")
+    # We assume the predicate is vectorized (operates on the whole object)
+    return self.predicate(cast("Any", data))
+
 
 class OneOf(Validator[pd.Series | pd.DataFrame | pd.Index]):
   """Validator for categorical values - ensures all values are in allowed set.
@@ -840,11 +1163,16 @@ class OneOf(Validator[pd.Series | pd.DataFrame | pd.Index]):
         report_failures(
           data, mask, f"Values must be one of {self.allowed}, got invalid: {invalid}"
         )
-    elif isinstance(data, pd.DataFrame):
-      mask = ~data.isin(self.allowed) & pd.notna(data)
-      if mask.any().any():
-        # For DataFrames, we report column-wise failures via report_failures
-        report_failures(data, mask, f"Values must be one of {self.allowed}")
+
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Return boolean validity mask."""
+    if isinstance(data, (pd.Index, pd.Series)):
+      return data.isin(self.allowed) | pd.isna(data)
+    if isinstance(data, pd.DataFrame):
+      # data.isin results in False for NaN, but we allow NaN
+      return data.isin(self.allowed) | pd.isna(data)
+    return np.ones(len(data), dtype=bool)
 
 
 # =============================================================================
@@ -862,7 +1190,7 @@ class _ExactDim:
   def __init__(self, n: int) -> None:
     self.n = n
 
-  def check(self, value: int) -> bool:
+  def check(self, value: object) -> bool:
     return value == self.n
 
   def describe(self) -> str:
@@ -872,11 +1200,41 @@ class _ExactDim:
 class _AnyDimConstraint:
   """Any dimension constraint."""
 
-  def check(self, value: int) -> bool:  # noqa: ARG002
+  def check(self, value: object) -> bool:  # noqa: ARG002
     return True
 
   def describe(self) -> str:
     return "any"
+
+
+class IsNaN(Validator[Any]):
+  """Validator and ScalarConstraint for checking if a value is NaN."""
+
+  def check(self, value: object) -> bool:
+    return pd.isna(cast("Any", value))
+
+  def describe(self) -> str:
+    return "NaN"
+
+  @override
+  def validate_vectorized(self, data: PandasData) -> VectorizedResult:
+    """Return boolean validity mask."""
+    return pd.isna(getattr(data, "values", data))
+
+
+class NotIsNaN(Not):
+  """Validator that ensures values are not NaN (missing).
+
+  Equivalent to Not(IsNaN).
+  """
+
+  def __init__(self) -> None:
+    super().__init__(IsNaN())
+
+  @override
+  def negate(self) -> IsNaN:
+    """Return IsNaN as the logical negation of NotIsNaN."""
+    return IsNaN()
 
 
 def _parse_dim_constraint(item: object) -> ScalarConstraint:

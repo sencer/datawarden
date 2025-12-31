@@ -9,14 +9,15 @@ if TYPE_CHECKING:
   from datawarden.base import Validator
 
 from datawarden.validators.comparison import Ge, Gt, Le, Lt
+from datawarden.validators.logic import Not
 from datawarden.validators.value import (
   AllowInf,
   AllowNaN,
   Between,
   Finite,
   IgnoringNaNs,
-  NonNaN,
-  NonNegative,
+  IsNaN,
+  Negative,
   OneOf,
   Positive,
   StrictFinite,
@@ -206,21 +207,54 @@ class ValidationDomain:
       domain.min_inclusive = v.lower_inclusive
       domain.max_inclusive = v.upper_inclusive
       domain.allows_nan = False
+    elif isinstance(v, Negative):
+      # Negative is < 0 -> max=0 exclusive
+      domain.max_val = 0
+      domain.max_inclusive = False
+      domain.allows_nan = False
     elif isinstance(v, Positive):
+      # Positive is > 0 -> min=0 exclusive
       domain.min_val = 0
       domain.min_inclusive = False
       domain.allows_nan = False
-    elif isinstance(v, NonNegative):
-      domain.min_val = 0
-      domain.min_inclusive = True
-      domain.allows_nan = False
+    elif isinstance(v, Not):
+      # Handle Not Logic
+      if isinstance(v.wrapped, IsNaN):
+        domain.allows_nan = False
+      elif isinstance(v.wrapped, Negative):
+        # Not(Negative) -> Not(<0) -> >=0 (NonNegative)
+        domain.min_val = 0
+        domain.min_inclusive = True
+        domain.allows_nan = False
+      elif isinstance(v.wrapped, Positive):
+        # Not(Positive) -> Not(>0) -> <=0 (NonPositive)
+        domain.max_val = 0
+        domain.max_inclusive = True
+        domain.allows_nan = False
+      elif isinstance(v.wrapped, Between):
+        # Not(Between) -> Outside range.
+        # ValidationDomain represents ALLOWED Single Interval.
+        # Outside range is split interval (x<min OR x>max).
+        # ValidationDomain cannot represent disjoint intervals yet?
+        # Domain doc: "min_val...max_val". Implies AND logic.
+        # So we cannot represent Not(Between).
+        pass
     elif isinstance(v, Finite):
       domain.allows_inf = False
     elif isinstance(v, StrictFinite):
       domain.allows_inf = False
       domain.allows_nan = False
-    elif isinstance(v, NonNaN):
-      domain.allows_nan = False
+    elif isinstance(v, IsNaN):
+      # Domain must ONLY be NaN?
+      # The domain structure assumes values exist, plus flags.
+      # If min_val is set, it implies numeric.
+      # If validator says IsNaN, allowed set is {NaN}.
+      # Current domain structure can't effectively represent "Only NaN".
+      # But allows_nan=True is set.
+      # Maybe we set allows_nan=True and set min/max to None?
+      # But existing domain logic might intersect.
+      # Let's ignore IsNaN for now unless requested (it wasn't in previous logic).
+      pass
     elif isinstance(v, (IgnoringNaNs, AllowNaN)):
       if isinstance(v, IgnoringNaNs) and v.wrapped is not None:
         domain = cls.from_validator(v.wrapped)
@@ -270,6 +304,6 @@ class ValidationDomain:
     elif not self.allows_inf:
       vals.append(StrictFinite())
     else:
-      vals.append(NonNaN())
+      vals.append(Not(IsNaN()))
 
     return vals

@@ -62,7 +62,7 @@ class NoTimeGaps(Validator[pd.Series | pd.Index]):
   def __repr__(self) -> str:
     return f"NoTimeGaps({self.freq!r})"
 
-  priority = Priority.COMPLEX
+  priority = Priority.VECTORIZED
 
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
@@ -134,7 +134,7 @@ class MaxGap(Validator[pd.Series | pd.Index]):
   def __repr__(self) -> str:
     return f"MaxGap({self.max_gap!r})"
 
-  priority = Priority.COMPLEX
+  priority = Priority.VECTORIZED
 
   @override
   def validate(self, data: pd.Series | pd.Index) -> None:
@@ -196,7 +196,7 @@ class MaxDiff(Validator[pd.Series]):
     ```
   """
 
-  priority = Priority.COMPLEX
+  priority = Priority.VECTORIZED
 
   def __init__(self, max_diff: float | int, ignore_nan: bool = False) -> None:
     super().__init__()

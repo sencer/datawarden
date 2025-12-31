@@ -1,4 +1,4 @@
-"""Tests for numeric validators: NonNegative and Positive."""
+"""Tests for numeric validators: Not(Negative) and Positive."""
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportCallIssue=false, reportAttributeAccessIssue=false
 
@@ -6,41 +6,41 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from datawarden import Negative, NonNegative, NonPositive, Positive
+from datawarden import Negative, Not, Positive
 
 
-class TestNonNegative:
-  """Tests for NonNegative validator."""
+class TestNotNegative:
+  """Tests for Not(Negative) validator."""
 
   def test_validate_with_valid_series_passes(self):
-    """Test NonNegative validator with valid Series."""
+    """Test Not(Negative) validator with valid Series."""
     data = pd.Series([0.0, 1.0, 2.0])
-    validator = NonNegative()
+    validator = Not(Negative())
     assert validator.validate(data) is None
 
   def test_validate_with_negative_values_raises_error(self):
-    """Test NonNegative validator rejects negative values."""
+    """Test Not(Negative) validator rejects negative values."""
     data = pd.Series([1.0, -1.0, 3.0])
-    validator = NonNegative()
+    validator = Not(Negative())
     with pytest.raises(ValueError, match="must be non-negative"):
       validator.validate(data)
 
   def test_validate_with_zero_values_passes(self):
-    """Test NonNegative validator allows zero."""
+    """Test Not(Negative) validator allows zero."""
     data = pd.Series([0.0, 0.0, 0.0])
-    validator = NonNegative()
+    validator = Not(Negative())
     assert validator.validate(data) is None
 
   def test_validate_with_valid_dataframe_passes(self):
-    """Test NonNegative validator with DataFrame."""
+    """Test Not(Negative) validator with DataFrame."""
     data = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
-    validator = NonNegative()
+    validator = Not(Negative())
     assert validator.validate(data) is None
 
   def test_validate_with_nan_values_raises_error(self):
-    """Test NonNegative validator rejects NaN values (without wrapper)."""
+    """Test Not(Negative) validator rejects NaN values (without wrapper)."""
     data = pd.Series([1.0, np.nan, 3.0])
-    validator = NonNegative()
+    validator = Not(Negative())
     with pytest.raises(ValueError, match="Cannot validate non-negative with NaN"):
       validator.validate(data)
 
@@ -123,37 +123,37 @@ class TestNegative:
     assert validator.validate(data) is None
 
 
-class TestNonPositive:
-  """Tests for NonPositive validator."""
+class TestNotPositive:
+  """Tests for Not(Positive) validator."""
 
   def test_validate_with_valid_series_passes(self):
-    """Test NonPositive validator with valid Series."""
+    """Test Not(Positive) validator with valid Series."""
     data = pd.Series([0.0, -1.0, -2.0])
-    validator = NonPositive()
+    validator = Not(Positive())
     assert validator.validate(data) is None
 
   def test_validate_with_positive_values_raises_error(self):
-    """Test NonPositive validator rejects positive values."""
+    """Test Not(Positive) validator rejects positive values."""
     data = pd.Series([-1.0, 1.0, -3.0])
-    validator = NonPositive()
+    validator = Not(Positive())
     with pytest.raises(ValueError, match="must be non-positive"):
       validator.validate(data)
 
   def test_validate_with_zero_values_passes(self):
-    """Test NonPositive validator allows zero."""
+    """Test Not(Positive) validator allows zero."""
     data = pd.Series([0.0, 0.0, 0.0])
-    validator = NonPositive()
+    validator = Not(Positive())
     assert validator.validate(data) is None
 
   def test_validate_with_valid_dataframe_passes(self):
-    """Test NonPositive validator with DataFrame."""
+    """Test Not(Positive) validator with DataFrame."""
     data = pd.DataFrame({"a": [-1.0, 0.0], "b": [-3.0, -4.0]})
-    validator = NonPositive()
+    validator = Not(Positive())
     assert validator.validate(data) is None
 
   def test_validate_with_nan_values_raises_error(self):
-    """Test NonPositive validator rejects NaN values (without wrapper)."""
+    """Test Not(Positive) validator rejects NaN values (without wrapper)."""
     data = pd.Series([-1.0, np.nan, -3.0])
-    validator = NonPositive()
+    validator = Not(Positive())
     with pytest.raises(ValueError, match="Cannot validate non-positive with NaN"):
       validator.validate(data)

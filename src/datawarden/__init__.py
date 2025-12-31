@@ -13,8 +13,11 @@ from datawarden.exceptions import LogicError
 
 # All validators
 from datawarden.validators import (
+  AllowInf,
+  AllowNaN,
   Between,
   Datetime,
+  Empty,
   Finite,
   Ge,
   Gt,
@@ -24,6 +27,7 @@ from datawarden.validators import (
   Index,
   Is,
   IsDtype,
+  IsNaN,
   Le,
   Lt,
   MaxDiff,
@@ -31,12 +35,14 @@ from datawarden.validators import (
   MonoDown,
   MonoUp,
   Negative,
-  NonEmpty,
-  NonNaN,
   NonNegative,
   NonPositive,
+  Not,
+  NotEmpty,
   NoTimeGaps,
+  NotIsNaN,
   OneOf,
+  Outside,
   Positive,
   Rows,
   Shape,
@@ -45,25 +51,22 @@ from datawarden.validators import (
 )
 
 __all__ = [
-  # Range validators
+  "AllowInf",
+  "AllowNaN",
   "Between",
-  # Index validators
   "Datetime",
-  # Value validators
+  "Empty",
   "Finite",
-  # Comparison validators
   "Ge",
   "Gt",
   "HasColumn",
   "HasColumns",
   "IgnoringNaNs",
   "Index",
-  # Lambda validators
   "Is",
-  # Column validators
   "IsDtype",
+  "IsNaN",
   "Le",
-  # Exceptions
   "LogicError",
   "Lt",
   "MaxDiff",
@@ -71,23 +74,21 @@ __all__ = [
   "MonoDown",
   "MonoUp",
   "Negative",
-  # Gap validators
   "NoTimeGaps",
-  "NonEmpty",
-  "NonNaN",
   "NonNegative",
   "NonPositive",
+  "Not",
+  "NotEmpty",
+  "NotIsNaN",
   "OneOf",
+  "Outside",
   "Positive",
   "Rows",
   "Shape",
   "StrictFinite",
   "Unique",
-  # Base
   "Validated",
   "Validator",
-  # Version
   "__version__",
-  # Decorator
   "validate",
 ]
