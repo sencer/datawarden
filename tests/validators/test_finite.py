@@ -1,137 +1,90 @@
-"""Tests for Finite and StrictFinite validators."""
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
-# pyright: reportCallIssue=false, reportAttributeAccessIssue=false
+"""Tests for Finite validator."""
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from datawarden import Finite, StrictFinite
+from datawarden import Validated, validate
+from datawarden.exceptions import ValidationError
+from datawarden.validators import Finite
 
 
 class TestFinite:
-  """Tests for Finite validator (rejects Inf, allows NaN)."""
+  """Tests for Finite validator (rejects Inf and NaN)."""
 
   def test_validate_with_valid_series_passes(self):
     """Test Finite validator with valid Series."""
+
+    @validate
+    def process(data: Validated[pd.Series, Finite]) -> pd.Series:
+      return data
+
     data = pd.Series([1.0, 2.0, 3.0])
-    validator = Finite()
-    assert validator.validate(data) is None
+    result = process(data)
+    assert result.equals(data)
 
   def test_validate_with_valid_dataframe_passes(self):
     """Test Finite validator with valid DataFrame."""
+
+    @validate
+    def process(data: Validated[pd.DataFrame, Finite]) -> pd.DataFrame:
+      return data
+
     data = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0]})
-    validator = Finite()
-    assert validator.validate(data) is None
+    result = process(data)
+    assert result.equals(data)
 
   def test_validate_with_inf_values_raises_error(self):
     """Test Finite validator rejects Inf."""
-    data = pd.Series([1.0, np.inf, 3.0])
-    validator = Finite()
-    with pytest.raises(ValueError, match="must be finite"):
-      validator.validate(data)
 
-  def test_validate_with_nan_values_passes(self):
-    """Test Finite validator allows NaN (unless strictly forbidden)."""
+    @validate
+    def process(data: Validated[pd.Series, Finite]) -> pd.Series:
+      return data
+
+    data = pd.Series([1.0, np.inf, 3.0])
+    with pytest.raises(ValidationError):
+      process(data)
+
+  def test_validate_with_neg_inf_values_raises_error(self):
+    """Test Finite validator rejects -Inf."""
+
+    @validate
+    def process(data: Validated[pd.Series, Finite]) -> pd.Series:
+      return data
+
+    data = pd.Series([1.0, -np.inf, 3.0])
+    with pytest.raises(ValidationError):
+      process(data)
+
+  def test_validate_with_nan_values_raises_error(self):
+    """Test Finite validator rejects NaN."""
+
+    @validate
+    def process(data: Validated[pd.Series, Finite]) -> pd.Series:
+      return data
+
     data = pd.Series([1.0, np.nan, 3.0])
-    validator = Finite()
-    # Finite allows NaN - strict Not(IsNaN) check must be explicit
-    assert validator.validate(data) is None
+    with pytest.raises(ValidationError):
+      process(data)
 
   def test_validate_dataframe_with_inf_values_raises_error(self):
     """Test Finite validator rejects DataFrame with Inf."""
+
+    @validate
+    def process(data: Validated[pd.DataFrame, Finite]) -> pd.DataFrame:
+      return data
+
     data = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, np.inf]})
-    validator = Finite()
-    with pytest.raises(ValueError, match="must be finite"):
-      validator.validate(data)
+    with pytest.raises(ValidationError):
+      process(data)
 
   def test_validate_with_empty_series_passes(self):
     """Test Finite validator with empty Series."""
+
+    @validate
+    def process(data: Validated[pd.Series, Finite]) -> pd.Series:
+      return data
+
     data = pd.Series([], dtype=float)
-    validator = Finite()
-    assert validator.validate(data) is None
-
-  def test_validate_with_non_pandas_type_raises_type_error(self):
-    """Test Finite validator with non-pandas type raises TypeError."""
-    validator = Finite()
-    with pytest.raises(TypeError, match="requires pandas"):
-      validator.validate(42)
-
-  def test_finite_on_string_series(self):
-    """Finite should raise TypeError when applied to non-numeric Series."""
-    v = Finite()
-    s = pd.Series(["a", "b"])
-    with pytest.raises(TypeError, match="numeric"):
-      v.validate(s)
-
-  def test_finite_on_mixed_df(self):
-    """Finite should ignore non-numeric columns in DataFrames."""
-    v = Finite()
-    df = pd.DataFrame({"a": [1.0, 2.0], "b": ["x", "y"]})
-    v.validate(df)
-
-
-class TestStrictFinite:
-  """Tests for StrictFinite validator (rejects both Inf and NaN)."""
-
-  def test_validate_with_valid_series_passes(self):
-    """Test StrictFinite validator with valid Series."""
-    data = pd.Series([1.0, 2.0, 3.0])
-    validator = StrictFinite()
-    assert validator.validate(data) is None
-
-  def test_validate_with_inf_values_raises_error(self):
-    """Test StrictFinite validator rejects Inf."""
-    data = pd.Series([1.0, np.inf, 3.0])
-    validator = StrictFinite()
-    with pytest.raises(ValueError, match="must be finite"):
-      validator.validate(data)
-
-  def test_validate_with_nan_values_raises_error(self):
-    """Test StrictFinite validator rejects NaN."""
-    data = pd.Series([1.0, np.nan, 3.0])
-    validator = StrictFinite()
-    with pytest.raises(ValueError, match="must be finite"):
-      validator.validate(data)
-
-  def test_validate_dataframe_with_inf_values_raises_error(self):
-    """Test StrictFinite validator rejects DataFrame with Inf."""
-    data = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, np.inf]})
-    validator = StrictFinite()
-    with pytest.raises(ValueError, match="must be finite"):
-      validator.validate(data)
-
-  def test_validate_dataframe_with_nan_values_raises_error(self):
-    """Test StrictFinite validator rejects DataFrame with NaN."""
-    data = pd.DataFrame({"a": [1.0, np.nan], "b": [3.0, 4.0]})
-    validator = StrictFinite()
-    with pytest.raises(ValueError, match="must be finite"):
-      validator.validate(data)
-
-  def test_strict_finite_on_string_series(self):
-    """StrictFinite should raise TypeError when applied to non-numeric Series."""
-    v = StrictFinite()
-    s = pd.Series(["a", "b"])
-    with pytest.raises(TypeError, match="numeric"):
-      v.validate(s)
-
-  def test_strict_finite_on_mixed_df(self):
-    """StrictFinite should ignore non-numeric columns in DataFrames."""
-    v = StrictFinite()
-    df = pd.DataFrame({"a": [1.0, 2.0], "b": ["x", "y"]})
-    v.validate(df)
-
-  def test_finite_strict_finite_type_errors(self):
-    v = Finite()
-    with pytest.raises(TypeError, match="Finite requires numeric data"):
-      v.validate(pd.Series(["a", "b"]))
-
-    with pytest.raises(TypeError, match="Finite requires numeric data"):
-      v.validate(pd.Index(["a", "b"]))
-
-    with pytest.raises(TypeError, match="Finite requires pandas"):
-      v.validate([1, 2])
-
-    v2 = StrictFinite()
-    with pytest.raises(TypeError, match="StrictFinite requires numeric data"):
-      v2.validate(pd.Series(["a", "b"]))
+    result = process(data)
+    assert result.equals(data)

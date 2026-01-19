@@ -1,11 +1,11 @@
 """Tests for index validators: Datetime, Unique, MonoUp, MonoDown, Index."""
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
-# pyright: reportCallIssue=false, reportAttributeAccessIssue=false
 
 import pandas as pd
 import pytest
 
-from datawarden import Datetime, Index, MonoDown, MonoUp, Unique
+from datawarden import Validated, validate
+from datawarden.exceptions import ValidationError
+from datawarden.validators import Datetime, Index, MonoDown, MonoUp, Unique
 
 
 class TestDatetime:
@@ -13,86 +13,90 @@ class TestDatetime:
 
   def test_valid_datetime_index(self):
     """Test Datetime validator with valid DatetimeIndex."""
+
+    @validate
+    def process(data: Validated[pd.Series, Index(Datetime)]) -> pd.Series:
+      return data
+
     dates = pd.date_range("2024-01-01", periods=3)
     data = pd.Series([1, 2, 3], index=dates)
-    validator = Index(Datetime)
-    validator = Index(Datetime)
-    assert validator.validate(data) is None
+    result = process(data)
+    assert result.equals(data)
 
   def test_invalid_int_index(self):
     """Test Datetime validator rejects integer index."""
+
+    @validate
+    def process(data: Validated[pd.Series, Index(Datetime)]) -> pd.Series:
+      return data
+
     data = pd.Series([1, 2, 3])
-    validator = Index(Datetime)
-    with pytest.raises(ValueError, match="Index must be DatetimeIndex"):
-      validator.validate(data)
+    with pytest.raises(ValidationError):
+      process(data)
 
   def test_dataframe_with_datetime_index(self):
     """Test Datetime validator with DataFrame."""
+
+    @validate
+    def process(data: Validated[pd.DataFrame, Index(Datetime)]) -> pd.DataFrame:
+      return data
+
     dates = pd.date_range("2024-01-01", periods=3)
     data = pd.DataFrame({"a": [1, 2, 3]}, index=dates)
-    validator = Index(Datetime)
-    validator = Index(Datetime)
-    assert validator.validate(data) is None
-
-  def test_non_pandas_type(self):
-    """Test Datetime validator with non-pandas type raises TypeError."""
-    validator = Index(Datetime)
-    with pytest.raises(TypeError, match="requires pandas"):
-      validator.validate([1, 2, 3])
+    result = process(data)
+    assert result.equals(data)
 
 
 class TestUnique:
   """Tests for Unique validator."""
 
   def test_unique_series(self):
-    validator = Unique()
+    """Test Unique validator with Series."""
+
+    @validate
+    def process(data: Validated[pd.Series, Unique]) -> pd.Series:
+      return data
 
     # Valid
     data = pd.Series([1, 2, 3])
-    assert validator.validate(data) is None
+    result = process(data)
+    assert result.equals(data)
 
     # Invalid
-    data = pd.Series([1, 2, 1])
-    with pytest.raises(ValueError, match="Values must be unique"):
-      validator.validate(data)
-
-  def test_unique_index(self):
-    validator = Unique()
-
-    # Valid
-    index = pd.Index([1, 2, 3])
-    assert validator.validate(index) is None
-
-    # Invalid
-    index = pd.Index([1, 2, 1])
-    with pytest.raises(ValueError, match="Values must be unique"):
-      validator.validate(index)
+    with pytest.raises(ValidationError):
+      process(pd.Series([1, 2, 1]))
 
   def test_index_unique_series(self):
     """Test Index[Unique] with Series."""
-    validator = Index(Unique)
+
+    @validate
+    def process(data: Validated[pd.Series, Index(Unique)]) -> pd.Series:
+      return data
 
     # Valid
     data = pd.Series([1, 2, 3], index=[1, 2, 3])
-    assert validator.validate(data) is None
+    result = process(data)
+    assert result.equals(data)
 
     # Invalid
-    data = pd.Series([1, 2, 3], index=[1, 1, 3])
-    with pytest.raises(ValueError, match="Values must be unique"):
-      validator.validate(data)
+    with pytest.raises(ValidationError):
+      process(pd.Series([1, 2, 3], index=[1, 1, 3]))
 
   def test_index_unique_dataframe(self):
     """Test Index[Unique] with DataFrame."""
-    validator = Index(Unique)
+
+    @validate
+    def process(data: Validated[pd.DataFrame, Index(Unique)]) -> pd.DataFrame:
+      return data
 
     # Valid
     data = pd.DataFrame({"a": [1, 2]}, index=pd.Index([1, 2]))
-    assert validator.validate(data) is None
+    result = process(data)
+    assert result.equals(data)
 
     # Invalid
-    data = pd.DataFrame({"a": [1, 2]}, index=pd.Index([1, 1]))
-    with pytest.raises(ValueError, match="Values must be unique"):
-      validator.validate(data)
+    with pytest.raises(ValidationError):
+      process(pd.DataFrame({"a": [1, 2]}, index=pd.Index([1, 1])))
 
 
 class TestMonoUp:
@@ -100,72 +104,86 @@ class TestMonoUp:
 
   def test_valid_series_increasing(self):
     """Test MonoUp validator with valid increasing Series."""
+
+    @validate
+    def process(data: Validated[pd.Series, MonoUp]) -> pd.Series:
+      return data
+
     data = pd.Series([1, 2, 3, 4, 5])
-    validator = MonoUp()
-    validator = MonoUp()
-    assert validator.validate(data) is None
+    result = process(data)
+    assert result.equals(data)
 
   def test_valid_series_equal(self):
     """Test MonoUp validator allows equal consecutive values."""
+
+    @validate
+    def process(data: Validated[pd.Series, MonoUp]) -> pd.Series:
+      return data
+
     data = pd.Series([1, 2, 2, 3, 3, 4])
-    validator = MonoUp()
-    validator = MonoUp()
-    assert validator.validate(data) is None
+    result = process(data)
+    assert result.equals(data)
 
   def test_invalid_series_decreasing(self):
     """Test MonoUp validator rejects decreasing values."""
+
+    @validate
+    def process(data: Validated[pd.Series, MonoUp]) -> pd.Series:
+      return data
+
     data = pd.Series([1, 2, 3, 2, 5])
-    validator = MonoUp()
-    with pytest.raises(ValueError, match="must be monotonically increasing"):
-      validator.validate(data)
-
-  def test_valid_index(self):
-    """Test MonoUp validator with valid increasing Index."""
-    data = pd.Index([1, 2, 3, 4, 5])
-    validator = MonoUp()
-    validator = MonoUp()
-    assert validator.validate(data) is None
-
-  def test_invalid_index(self):
-    """Test MonoUp validator rejects non-monotonic Index."""
-    data = pd.Index([1, 2, 3, 2, 5])
-    validator = MonoUp()
-    with pytest.raises(ValueError, match="must be monotonically increasing"):
-      validator.validate(data)
+    with pytest.raises(ValidationError):
+      process(data)
 
   def test_index_monoup(self):
     """Test Index[MonoUp] validator with monotonic index."""
+
+    @validate
+    def process(data: Validated[pd.Series, Index(MonoUp)]) -> pd.Series:
+      return data
+
     data = pd.Series([1, 2, 3], index=[0, 1, 2])
-    validator = Index(MonoUp)
-    validator = Index(MonoUp)
-    assert validator.validate(data) is None
+    result = process(data)
+    assert result.equals(data)
 
   def test_non_monotonic_index(self):
     """Test Index[MonoUp] validator rejects non-monotonic index."""
+
+    @validate
+    def process(data: Validated[pd.Series, Index(MonoUp)]) -> pd.Series:
+      return data
+
     data = pd.Series([1, 2, 3], index=[0, 2, 1])
-    validator = Index(MonoUp)
-    with pytest.raises(ValueError, match="must be monotonically increasing"):
-      validator.validate(data)
+    with pytest.raises(ValidationError):
+      process(data)
 
   def test_datetime_monotonic(self):
     """Test Index[MonoUp] validator with datetime index."""
+
+    @validate
+    def process(data: Validated[pd.Series, Index(MonoUp)]) -> pd.Series:
+      return data
+
     dates = pd.date_range("2024-01-01", periods=3)
     data = pd.Series([1, 2, 3], index=dates)
-    validator = Index(MonoUp)
-    validator = Index(MonoUp)
-    assert validator.validate(data) is None
+    result = process(data)
+    assert result.equals(data)
 
   def test_datetime_non_monotonic(self):
     """Test Index[MonoUp] validator rejects non-monotonic datetime."""
+
+    @validate
+    def process(data: Validated[pd.Series, Index(MonoUp)]) -> pd.Series:
+      return data
+
     dates = [
       pd.Timestamp("2024-01-01"),
       pd.Timestamp("2024-01-03"),
       pd.Timestamp("2024-01-02"),
     ]
     data = pd.Series([1, 2, 3], index=dates)
-    validator = Index(MonoUp)
-    with pytest.raises(ValueError, match="must be monotonically increasing"):
-      validator.validate(data)
+    with pytest.raises(ValidationError):
+      process(data)
 
 
 class TestMonoDown:
@@ -173,61 +191,64 @@ class TestMonoDown:
 
   def test_valid_series_decreasing(self):
     """Test MonoDown validator with valid decreasing Series."""
+
+    @validate
+    def process(
+      data: Validated[
+        pd.Series,
+        MonoDown,
+      ],
+    ) -> pd.Series:
+      return data
+
     data = pd.Series([5, 4, 3, 2, 1])
-    validator = MonoDown()
-    validator = MonoDown()
-    assert validator.validate(data) is None
+    result = process(data)
+    assert result.equals(data)
 
   def test_valid_series_equal(self):
     """Test MonoDown validator allows equal consecutive values."""
+
+    @validate
+    def process(
+      data: Validated[
+        pd.Series,
+        MonoDown,
+      ],
+    ) -> pd.Series:
+      return data
+
     data = pd.Series([5, 4, 4, 3, 3, 2])
-    validator = MonoDown()
-    validator = MonoDown()
-    assert validator.validate(data) is None
+    result = process(data)
+    assert result.equals(data)
 
   def test_invalid_series_increasing(self):
     """Test MonoDown validator rejects increasing values."""
+
+    @validate
+    def process(
+      data: Validated[
+        pd.Series,
+        MonoDown,
+      ],
+    ) -> pd.Series:
+      return data
+
     data = pd.Series([5, 4, 3, 4, 1])
-    validator = MonoDown()
-    with pytest.raises(ValueError, match="must be monotonically decreasing"):
-      validator.validate(data)
-
-  def test_valid_index(self):
-    """Test MonoDown validator with valid decreasing Index."""
-    data = pd.Index([5, 4, 3, 2, 1])
-    validator = MonoDown()
-    validator = MonoDown()
-    assert validator.validate(data) is None
-
-  def test_invalid_index(self):
-    """Test MonoDown validator rejects non-monotonic Index."""
-    data = pd.Index([5, 4, 3, 4, 1])
-    validator = MonoDown()
-    with pytest.raises(ValueError, match="must be monotonically decreasing"):
-      validator.validate(data)
+    with pytest.raises(ValidationError):
+      process(data)
 
 
 class TestIndexValidator:
   """Test Index validator edge cases."""
 
-  def test_index_with_non_dataframe(self):
-    """Test Index validator with Index object (no-op)."""
-    index = pd.Index([1, 2, 3, 4, 5])
-    validator = Index(Unique)
-    validator = Index(Unique)
-    assert validator.validate(index) is None
-
-  def test_index_with_validator_instance(self):
-    """Test Index validator with validator instance."""
-    df = pd.DataFrame({"a": [1, 2, 3]}, index=[0, 1, 2])
-    validator = Index(Unique)
-    validator = Index(Unique)
-    assert validator.validate(df) is None
-
   def test_index_with_multiple_validators(self):
     """Test Index validator with multiple validators."""
+
+    @validate
+    def process(df: Validated[pd.DataFrame, Index(Datetime, MonoUp)]) -> pd.DataFrame:
+      return df
+
     index = pd.date_range("2023-01-01", periods=5, freq="D")
     df = pd.DataFrame({"a": [1, 2, 3, 4, 5]}, index=index)
-    validator = Index(Datetime, MonoUp)
-    validator = Index(Datetime, MonoUp)
-    assert validator.validate(df) is None
+    result = process(df)
+    assert result.equals(df)
