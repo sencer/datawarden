@@ -55,7 +55,7 @@ class Is[T: PandasLike](BaseValidator[T]):
     # Handle numpy array / pandas object
     if hasattr(res, "all"):
       all_result = res.all()  # pyright: ignore[reportUnknownMemberType,reportAttributeAccessIssue]
-      if all_result:  # pyright: ignore[reportUnknownVariableType,reportGeneralTypeIssues]
+      if all_result is True or all_result is np.True_:
         return SUCCESS
       # res should be a mask here
       if isinstance(res, (pd.Series, pd.DataFrame)):
@@ -64,7 +64,7 @@ class Is[T: PandasLike](BaseValidator[T]):
         )
       return ValidationResult(success=False, message=f"Is({self.name}) failed")
 
-    if res:  # pyright: ignore[reportGeneralTypeIssues] - Truthy check on pandas type
+    if res is True or res is np.True_:
       return SUCCESS
 
     return ValidationResult(success=False, message=f"Is({self.name}) failed")

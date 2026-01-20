@@ -370,26 +370,29 @@ class MonoUp(BaseValidator["pd.Series[float] | pd.Index[float]"]):
 
     vals = data.values
     last_val = context.extra.get(self._state_key)
-    if last_val is not None and vals[0] < last_val:
-      return ValidationResult(
-        success=False, message="Monotonicity broken between chunks"
-      )
+    if last_val is not None:
+      res = vals[0] >= last_val
+      # If result is False or NA, it's a failure (strict)
+      if res is False or (res is not True and pd.isna(res)):
+        return ValidationResult(
+          success=False, message="Monotonicity broken between chunks"
+        )
 
-    if data.is_monotonic_increasing:
+    if pd.Series(vals).is_monotonic_increasing:
       context.extra[self._state_key] = vals[-1]
       return SUCCESS
 
     # Per-element mask for better error reporting and logic combination
     # Use ffill to ignore NaNs for monotonicity check
-    has_nans = np.isnan(vals).any()
+    has_nans = pd.isna(vals).any()
     filled = pd.Series(vals, copy=False).ffill().values if has_nans else vals
     mask = np.empty(len(vals), dtype=np.bool_)
     mask[0] = True
-    mask[1:] = filled[1:] >= filled[:-1]  # pyright: ignore[reportOperatorIssue]
+    mask[1:] = (pd.Series(filled[1:]) >= pd.Series(filled[:-1])).values
 
     # Reject NaNs by default (allowed if wrapped in Or(..., IsNaN))
     if has_nans:
-      mask &= ~np.isnan(vals)
+      mask &= pd.notna(vals)
 
     context.extra[self._state_key] = vals[-1]
     pd_mask = pd.Series(mask, index=data if isinstance(data, pd.Index) else data.index)

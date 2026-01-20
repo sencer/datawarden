@@ -69,20 +69,13 @@ class Validatable(Protocol):
   def values(self) -> np.ndarray[tuple[int, ...], np.dtype[np.floating]]: ...  # pyright: ignore[reportMissingTypeArgument]
 
 
-class SlicableIndexer(Protocol):
-  """Protocol for the .iloc indexer."""
-
-  def __getitem__[S: (pd.Series[float], pd.DataFrame)](self, key: slice) -> S: ...
-
-
 @runtime_checkable
 class Slicable(Validatable, Protocol):
-  """Object that can be sliced via .iloc and has a length."""
+  """Object that can be sliced and has a length."""
 
   def __len__(self) -> int: ...
 
-  @property
-  def iloc(self) -> SlicableIndexer: ...
+  def __getitem__(self, key: Any) -> Any: ...
 
 
 # Global executor pool to avoid thread spawn overhead and allow concurrent worker counts
@@ -170,6 +163,7 @@ def _get_base_validators(base_type: object) -> list[BaseValidator[PandasLike]]:
 
 class ValidationPlan:
   __slots__ = (
+    "_use_numba_at_init",
     "arg_indices",
     "arg_names",
     "arg_plans",
@@ -201,12 +195,20 @@ class ValidationPlan:
       if p.default is not inspect.Parameter.empty
     }
 
+    self._use_numba_at_init = get_config().use_numba
     self._parse_signature()
 
     # Pre-calculated list of names that have validators
     self.validation_order = [name for name in self.arg_names if name in self.arg_plans]
 
+  def _reoptimize(self, use_numba: bool) -> None:
+    """Re-optimize all argument plans with new Numba setting."""
+    self._use_numba_at_init = use_numba
+    self._parse_signature()
+    self.validation_order = [name for name in self.arg_names if name in self.arg_plans]
+
   def _parse_signature(self) -> None:
+    self.arg_plans.clear()
     for name, param in self.signature.parameters.items():
       hint = param.annotation
       target_hint, allow_none = _unwrap_annotation(hint)
@@ -448,6 +450,14 @@ def _combine_bounds[T: PandasLike](
 def _fuse_numeric[T: PandasLike](
   validators: list[BaseValidator[T]],
 ) -> list[BaseValidator[T]]:
+  cfg = get_config()
+  if cfg.use_numba:
+    # If Numba is enabled, we prefer to keep individual atom validators
+    # so that NumbaFusedValidator can fuse them into a single loop.
+    # Simplifying them to a single Between/Ge might actually lose 
+    # some Numba-specific optimizations or clarity.
+    return validators
+
   # Merge Gt/Ge/Lt/Le on same column/targets
   # If same target, we can find the tightest bound.
   # e.g. Ge(5) & Ge(10) -> Ge(10)
@@ -617,7 +627,7 @@ class OptimizedPlan[T: PandasLike]:
     return [r for r in results if r is not None]
 
   def _execute_chunked_msg(self, data: Slicable, chunk_size: int) -> str | None:
-    if not isinstance(data, (pd.Series, pd.DataFrame)):
+    if not isinstance(data, Slicable):
       return None
 
     results = self._execute_chunked(data, chunk_size)
@@ -647,7 +657,7 @@ class OptimizedPlan[T: PandasLike]:
 
     for start in range(0, total_rows, chunk_size):
       end = min(start + chunk_size, total_rows)
-      chunk = data.iloc[start:end]
+      chunk = data.iloc[start:end] if hasattr(data, "iloc") else data[start:end]
 
       if use_parallel:
         chunk_results = self._execute_parallel(chunk, context)
@@ -698,6 +708,10 @@ def validate[**P, R](func: Callable[P, R]) -> Callable[P, R]:
 
     if cfg.skip_validation:
       return func(*args, **kwargs)
+
+    # Re-optimize if Numba setting changed since plan creation
+    if cfg.use_numba != plan._use_numba_at_init:
+      plan._reoptimize(cfg.use_numba)
 
     try:
       plan.validate_args(*args, **kwargs)
