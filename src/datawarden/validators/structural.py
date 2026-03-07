@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast, override
+from typing import TYPE_CHECKING, Any, cast, override
 
 import numpy as np
 import pandas as pd
@@ -58,7 +58,7 @@ class Column(BaseValidator[pd.DataFrame]):
     self,
     name: str,
     /,
-    *validators: BaseValidator[pd.Series[float]],
+    *validators: BaseValidator[Any] | type[BaseValidator[Any]],
   ) -> None:
     super().__init__(name)
     self.column_name = name
@@ -280,7 +280,9 @@ class Index(BaseValidator["pd.Series[float] | pd.DataFrame"]):
   __slots__ = ("validator",)
   priority = Priority.STRUCTURAL
 
-  def __init__(self, *validators: BaseValidator[pd.Index[float]]) -> None:
+  def __init__(
+    self, *validators: BaseValidator[Any] | type[BaseValidator[Any]]
+  ) -> None:
     super().__init__()
     # Clone validators to ensure state isolation (Prototype Pattern)
     cloned: list[BaseValidator[pd.Index[float]]] = [

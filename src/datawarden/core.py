@@ -451,13 +451,6 @@ def _fuse_numeric[T: PandasLike](
   validators: list[BaseValidator[T]],
 ) -> list[BaseValidator[T]]:
   cfg = get_config()
-  if cfg.use_numba:
-    # If Numba is enabled, we prefer to keep individual atom validators
-    # so that NumbaFusedValidator can fuse them into a single loop.
-    # Simplifying them to a single Between/Ge might actually lose 
-    # some Numba-specific optimizations or clarity.
-    return validators
-
   # Merge Gt/Ge/Lt/Le on same column/targets
   # If same target, we can find the tightest bound.
   # e.g. Ge(5) & Ge(10) -> Ge(10)
@@ -489,6 +482,17 @@ def _fuse_numeric[T: PandasLike](
     has_not_nan = False
 
   res = _combine_bounds(gt_v, ge_v, lt_v, le_v)
+
+  # Optimization: If Numba is enabled and we have multiple numeric validators,
+  # we might want to keep them separate for Numba fusion to handle them.
+  # However, contradiction detection (in _combine_bounds) is still essential.
+  # If we are NOT in Numba mode, we always want the simplified version.
+  if cfg.use_numba and len(res) + len(others) >= NUMBA_FUSION_THRESHOLD:
+    # If it's a candidate for fusion, we can skip the simplified version
+    # but ONLY if it didn't find a contradiction.
+    # Actually, returning simplified 'res' is almost always better as it reduces work.
+    pass
+
   if has_not_nan and not any(x is not None for x in [gt_v, ge_v, lt_v, le_v]):
     res.append(cast("BaseValidator[T]", NotNaN))
   return res + others

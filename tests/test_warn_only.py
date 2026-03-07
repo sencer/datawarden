@@ -19,7 +19,7 @@ def test_warn_only() -> None:
     positive_only(s)
 
   # warn_only=True: issues warning, returns data
-  with Overrides(warn_only=True), pytest.warns(UserWarning, match=">0"):
+  with Overrides(warn_only=True), pytest.warns(UserWarning, match=">0.0"):
     res = positive_only(s)
     assert res is s
 

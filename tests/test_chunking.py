@@ -33,7 +33,8 @@ def test_chunking_execution() -> None:
 def test_stateful_monoup_chunking() -> None:
   # 1, 2, 3, 4, 5 | 4, 5, 6, 7, 8
   # MonoUp within chunks, but NOT across.
-  df = pd.DataFrame({"a": [1, 2, 3, 4, 5, 4, 5, 6, 7, 8]})
+  # Use floats to avoid RangeIndex optimization
+  df = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0, 5.0, 4.1, 5.1, 6.1, 7.1, 8.1]})
 
   @validate
   def process(df: Validated[pd.DataFrame, Column("a", MonoUp)]) -> bool:

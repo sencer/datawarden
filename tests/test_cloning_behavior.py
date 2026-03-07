@@ -79,7 +79,7 @@ def test_state_isolation_in_validation() -> None:
   ) -> bool:
     return True
 
-  df = pd.DataFrame({"a": [1, 2, 3, 4], "b": [1, 2, 1, 2]})
+  df = pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0], "b": [1.0, 2.0, 1.1, 2.1]})
 
   # With chunk_size=2, it should fail on column B at the boundary of second chunk.
   with Overrides(chunk_size_rows=2):

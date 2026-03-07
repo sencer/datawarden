@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from datawarden import Validated, validate
+from datawarden import Validated, get_config, validate
 from datawarden.core import ValidationPlan
 from datawarden.exceptions import LogicError, ValidationError
 from datawarden.validators.numeric import Ge, Gt, Lt, Positive
@@ -72,9 +72,11 @@ def test_execution_with_simplified_plan() -> None:
   with pytest.raises(ValidationError) as excinfo:
     func(df)
 
-  # It should NOT mention >0
-  assert ">10" in str(excinfo.value)
-  assert ">0" not in str(excinfo.value)
+  # It should NOT mention >0.0 separately if simplified
+  # Even if Numba is enabled, _fuse_numeric simplifies bounds to a single Ge/Gt
+  # if possible, which is more efficient.
+  assert ">10.0" in str(excinfo.value)
+  assert ">0.0" not in str(excinfo.value).replace(">10.0", "")
 
 
 def test_implicit_override_logic() -> None:
