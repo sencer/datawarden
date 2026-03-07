@@ -23,6 +23,7 @@ from .numeric import (
   Negative,
   NonNegative,
   NonPositive,
+  NotIsNaN,
   NotNaN,
   NumericValidator,
   Positive,
@@ -40,9 +41,6 @@ from .structural import (
   Shape,
 )
 from .value import Between, Is, NotOneOf, OneOf, Outside, Rows
-
-# Aliases for v1 compatibility
-NotIsNaN = NotNaN
 
 __all__ = [
   "SUCCESS",

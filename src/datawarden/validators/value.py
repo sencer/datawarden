@@ -54,7 +54,7 @@ class Is[T: PandasLike](BaseValidator[T]):
 
     # Handle numpy array / pandas object
     if hasattr(res, "all"):
-      all_result = res.all()  # pyright: ignore[reportUnknownMemberType,reportAttributeAccessIssue]
+      all_result = cast("Any", res).all()
       if all_result is True or all_result is np.True_:
         return SUCCESS
       # res should be a mask here
@@ -273,7 +273,9 @@ class OneOf[T: PandasLike](BaseValidator[T]):
   def validate(self, data: T, context: ValidationContext) -> ValidationResult:
     del context  # Unused
     vals = data.values
-    mask: npt.NDArray[np.bool_] = np.isin(vals, cast("Any", list(self.values)))  # pyright: ignore[reportExplicitAny]
+    mask: npt.NDArray[np.bool_] = np.isin(
+      cast("Any", vals), cast("npt.ArrayLike", list(self.values))
+    )
 
     if mask.all():
       return SUCCESS
@@ -310,7 +312,9 @@ class NotOneOf[T: PandasLike](BaseValidator[T]):
   def validate(self, data: T, context: ValidationContext) -> ValidationResult:
     del context  # Unused
     vals = data.values
-    mask: npt.NDArray[np.bool_] = ~np.isin(vals, cast("Any", list(self.values)))  # pyright: ignore[reportExplicitAny]
+    mask: npt.NDArray[np.bool_] = ~np.isin(
+      cast("Any", vals), cast("npt.ArrayLike", list(self.values))
+    )
 
     if mask.all():
       return SUCCESS

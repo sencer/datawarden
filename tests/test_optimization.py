@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from datawarden import Validated, get_config, validate
+from datawarden import Validated, validate
 from datawarden.core import ValidationPlan
 from datawarden.exceptions import LogicError, ValidationError
 from datawarden.validators.numeric import Ge, Gt, Lt, Positive

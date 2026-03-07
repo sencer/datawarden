@@ -272,9 +272,7 @@ class BaseValidator[T: PandasLike](ABC):
 class And[T: PandasLike](BaseValidator[T]):
   __slots__ = ("validators",)
 
-  def __init__(
-    self, *validators: BaseValidator[T] | type[BaseValidator[T]]
-  ) -> None:
+  def __init__(self, *validators: BaseValidator[T] | type[BaseValidator[T]]) -> None:
     super().__init__()
     # Flatten nested And validators for better debugging
     flattened: list[BaseValidator[T]] = []
@@ -410,9 +408,7 @@ class And[T: PandasLike](BaseValidator[T]):
 class Or[T: PandasLike](BaseValidator[T]):
   __slots__ = ("validators",)
 
-  def __init__(
-    self, *validators: BaseValidator[T] | type[BaseValidator[T]]
-  ) -> None:
+  def __init__(self, *validators: BaseValidator[T] | type[BaseValidator[T]]) -> None:
     super().__init__()
     # Flatten nested Or validators for better debugging
     flattened: list[BaseValidator[T]] = []
@@ -537,9 +533,7 @@ class Or[T: PandasLike](BaseValidator[T]):
 class Not[T: PandasLike](BaseValidator[T]):
   __slots__ = ("validator",)
 
-  def __init__(
-    self, validator: BaseValidator[T] | type[BaseValidator[T]], /
-  ) -> None:
+  def __init__(self, validator: BaseValidator[T] | type[BaseValidator[T]], /) -> None:
     super().__init__()
     self.validator = ensure_instance(validator).clone()
     self.complexity = self.validator.complexity

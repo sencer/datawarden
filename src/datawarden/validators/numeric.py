@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, overload, override
+from typing import TYPE_CHECKING, cast, overload, override
 
 import numpy as np
 import pandas as pd
@@ -46,8 +46,54 @@ class NumericValidator[T: (pd.Series[float], pd.DataFrame, pd.Index)](BaseValida
   def _get_mask_numpy(self, data: npt.NDArray[np.floating]) -> npt.NDArray[np.bool_]:
     raise NotImplementedError
 
+    vals = data.values
+    mask = self._get_mask_numpy(vals)
+
+    if self._check_mask_success(mask):
+      return SUCCESS
+
+    return ValidationResult(
+      success=False, message=str(self), mask=self._build_error_mask(data, mask)
+    )
+
+  @staticmethod
+  def _check_mask_success(mask: npt.NDArray[np.bool_]) -> bool:
+    # High-performance branching: type() is faster than isinstance() for exact matches
+    mask_type = type(mask)
+    if mask_type is np.ndarray:
+      return bool(mask.all())
+
+    if hasattr(mask, "all"):
+      # Pandas ExtensionArrays (like BooleanArray) default to skipna=True.
+      # We force skipna=False to ensure nulls are treated as failures.
+      try:
+        res = mask.all(skipna=False)
+        # In pandas, True is Success, False or <NA> is Failure.
+        return res is True or res is np.True_
+      except TypeError:
+        # Fallback for types that don't support skipna
+        return bool(mask.all())
+
+    return bool(mask)
+
+  @staticmethod
+  def _build_error_mask[T: (pd.Series[float], pd.DataFrame, pd.Index)](
+    data: T, mask: npt.NDArray[np.bool_]
+  ) -> pd.Series[bool] | pd.DataFrame | None:
+    # On failure, we might want a Pandas mask for better error reporting
+    if isinstance(data, pd.Series):
+      return pd.Series(mask, index=data.index, copy=False)
+
+    if isinstance(data, pd.DataFrame):
+      return pd.DataFrame(mask, index=data.index, columns=data.columns, copy=False)
+
+    if isinstance(data, pd.Index):
+      return pd.Series(mask, index=data, copy=False)
+
+    return None
+
   @override
-  def validate(self, data: T, context: ValidationContext) -> ValidationResult:
+  def validate(self, data: T, context: ValidationContext) -> ValidationResult:  # noqa: PLR0911
     del context  # Unused
     # Fast path for RangeIndex - O(1) bounds check
     if isinstance(data, pd.RangeIndex):
@@ -58,42 +104,37 @@ class NumericValidator[T: (pd.Series[float], pd.DataFrame, pd.Index)](BaseValida
       except NotImplementedError:
         pass
 
-    vals = data.values
-    mask = self._get_mask_numpy(vals)
-
-    # High-performance branching: type() is faster than isinstance() for exact matches
-    mask_type = type(mask)
-    if mask_type is np.ndarray:
-      success = bool(mask.all())
-    elif hasattr(mask, "all"):
-      # Pandas ExtensionArrays (like BooleanArray) default to skipna=True.
-      # We force skipna=False to ensure nulls are treated as failures.
+    # Optimization: Use Numba if possible
+    if self.numba_supported and get_config().use_numba:
       try:
-        res = mask.all(skipna=False)
-        # In pandas, True is Success, False or <NA> is Failure.
-        success = res is True or res is np.True_
-      except TypeError:
-        # Fallback for types that don't support skipna
-        success = bool(mask.all())
-    else:
-      success = bool(mask)
+        # Single-target numeric validation via Numba
+        # This expects a Series or a 1-column DataFrame/Index
+        # We use None as column map because it's single-column mode
+        success, mask = run_numba_validation_column_mode(
+          data, [self], None, len(data), cache_obj=self
+        )
+        if success:
+          return SUCCESS
+        if mask is not None:
+          return ValidationResult(
+            success=False, message=str(self), mask=self._build_error_mask(data, mask)
+          )
+      except (RuntimeError, ValueError, TypeError, ImportError, AttributeError):
+        pass
 
-    if success:
-      return SUCCESS
+    # Standard path: NumPy vectorization
+    try:
+      vals = data.values
+      mask = self._get_mask_numpy(vals)
 
-    # On failure, we might want a Pandas mask for better error reporting
-    if isinstance(data, pd.Series):
-      pd_mask: pd.Series[bool] | pd.DataFrame = pd.Series(
-        mask, index=data.index, copy=False
+      if self._check_mask_success(mask):
+        return SUCCESS
+
+      return ValidationResult(
+        success=False, message=str(self), mask=self._build_error_mask(data, mask)
       )
-    elif isinstance(data, pd.DataFrame):
-      pd_mask = pd.DataFrame(mask, index=data.index, columns=data.columns, copy=False)
-    elif isinstance(data, pd.Index):
-      pd_mask = pd.Series(mask, index=data, copy=False)
-    else:
-      # Fallback - shouldn't happen with proper typing
-      return ValidationResult(success=False, message=str(self))
-    return ValidationResult(success=False, message=str(self), mask=pd_mask)
+    except NotImplementedError:
+      return ValidationResult(success=False, message="Validation logic not implemented")
 
 
 class ComparisonValidator[T: (pd.Series[float], pd.DataFrame, pd.Index)](
@@ -264,7 +305,7 @@ class Gt[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
       return Le(self.value)
     if len(self.targets) == MAX_SMART_NEGATION_TARGETS:
       return Le(*self.targets)
-    return super().negate()
+    return cast("Le[T]", super().negate())
 
 
 class Ge[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
@@ -298,7 +339,7 @@ class Ge[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
       return Lt(self.value)
     if len(self.targets) == MAX_SMART_NEGATION_TARGETS:
       return Lt(*self.targets)
-    return super().negate()
+    return cast("Lt[T]", super().negate())
 
 
 class Lt[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
@@ -332,7 +373,7 @@ class Lt[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
       return Ge(self.value)
     if len(self.targets) == MAX_SMART_NEGATION_TARGETS:
       return Ge(*self.targets)
-    return super().negate()
+    return cast("Ge[T]", super().negate())
 
 
 class Le[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
@@ -366,7 +407,7 @@ class Le[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
       return Gt(self.value)
     if len(self.targets) == MAX_SMART_NEGATION_TARGETS:
       return Gt(*self.targets)
-    return super().negate()
+    return cast("Gt[T]", super().negate())
 
 
 class Eq[T: (pd.Series[float], pd.DataFrame, pd.Index)](NumericValidator[T]):
@@ -518,6 +559,10 @@ class NotNaN[T: (pd.Series[float], pd.DataFrame, pd.Index)](NumericValidator[T])
     return "NotNaN"
 
 
+# Aliases for v1 compatibility
+NotIsNaN = NotNaN
+
+
 class Positive[T: (pd.Series[float], pd.DataFrame, pd.Index)](Gt[T]):
   __slots__ = ()
 
@@ -525,7 +570,7 @@ class Positive[T: (pd.Series[float], pd.DataFrame, pd.Index)](Gt[T]):
     super().__init__(0)
 
   @override
-  def negate(self) -> NumericValidator[T]:
+  def negate(self) -> NonPositive[T]:
     return NonPositive()
 
   @override
@@ -540,7 +585,7 @@ class NonPositive[T: (pd.Series[float], pd.DataFrame, pd.Index)](Le[T]):
     super().__init__(0)
 
   @override
-  def negate(self) -> NumericValidator[T]:
+  def negate(self) -> Positive[T]:
     return Positive()
 
   @override
@@ -555,7 +600,7 @@ class Negative[T: (pd.Series[float], pd.DataFrame, pd.Index)](Lt[T]):
     super().__init__(0)
 
   @override
-  def negate(self) -> NumericValidator[T]:
+  def negate(self) -> NonNegative[T]:
     return NonNegative()
 
   @override
@@ -570,7 +615,7 @@ class NonNegative[T: (pd.Series[float], pd.DataFrame, pd.Index)](Ge[T]):
     super().__init__(0)
 
   @override
-  def negate(self) -> NumericValidator[T]:
+  def negate(self) -> Negative[T]:
     return Negative()
 
   @override

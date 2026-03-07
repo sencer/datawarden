@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, cast, override
 
 import numpy as np
 import pandas as pd
@@ -176,11 +176,11 @@ class NoTimeGaps(BaseValidator["pd.Series[float] | pd.Index[float]"]):
     # Convert to nanoseconds int64 for faster diff
     ts: npt.NDArray[np.int64] = vals.view(np.int64)
 
-    last_ts = context.extra.get(self._state_key)
+    last_ts = cast("int | None", context.extra.get(self._state_key))
     expected_ns = (
-      int(self.freq.total_seconds() * 1e9)  # pyright: ignore[reportAttributeAccessIssue]
+      int(cast("pd.Timedelta", self.freq).total_seconds() * 1e9)
       if hasattr(self.freq, "total_seconds")
-      else int(self.freq)  # pyright: ignore[reportArgumentType]
+      else int(cast("int", self.freq))
     )
 
     if last_ts is not None:
@@ -197,7 +197,7 @@ class NoTimeGaps(BaseValidator["pd.Series[float] | pd.Index[float]"]):
       return SUCCESS
 
     diffs = np.diff(ts)
-    mask_diffs = diffs == expected_ns
+    mask_diffs = cast("npt.NDArray[np.bool_]", diffs == expected_ns)
 
     context.extra[self._state_key] = ts[-1]
 
@@ -253,12 +253,12 @@ class MaxGap(BaseValidator["pd.Series[float] | pd.Index[float]"]):
 
     ts: npt.NDArray[np.int64] = vals.view(np.int64)
     max_ns = (
-      int(self.duration.total_seconds() * 1e9)  # pyright: ignore[reportAttributeAccessIssue]
+      int(cast("pd.Timedelta", self.duration).total_seconds() * 1e9)
       if hasattr(self.duration, "total_seconds")
-      else int(self.duration)  # pyright: ignore[reportArgumentType]
+      else int(cast("int", self.duration))
     )
 
-    last_ts = context.extra.get(self._state_key)
+    last_ts = cast("int | None", context.extra.get(self._state_key))
     if last_ts is not None and (ts[0] - last_ts) > max_ns:
       return ValidationResult(
         success=False,
@@ -368,12 +368,12 @@ class MonoUp(BaseValidator["pd.Series[float] | pd.Index[float]"]):
     if len(data) == 0:
       return SUCCESS
 
-    vals = pd.Series(data).values
+    vals = cast("npt.NDArray[np.floating[Any]]", data.values)
     last_val = context.extra.get(self._state_key)
     if last_val is not None:
-      res = vals[0] >= last_val
+      res = bool(vals[0] >= last_val)
       # If result is False or NA, it's a failure (strict)
-      if res is False or res is np.False_ or (res is not True and res is not np.True_ and pd.isna(res)):
+      if not res:
         return ValidationResult(
           success=False, message="Monotonicity broken between chunks"
         )
@@ -446,10 +446,10 @@ class MonoDown(BaseValidator["pd.Series[float] | pd.Index[float]"]):
     if len(data) == 0:
       return SUCCESS
 
-    vals = pd.Series(data).values
+    vals = cast("npt.NDArray[np.floating[Any]]", data.values)
     last_val = context.extra.get(self._state_key)
     if last_val is not None:
-      res = vals[0] <= last_val
+      res = bool(vals[0] <= last_val)
       # If result is False or NA, it's a failure (strict)
       if res is False or (res is not True and pd.isna(res)):
         return ValidationResult(

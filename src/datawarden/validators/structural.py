@@ -58,7 +58,8 @@ class Column(BaseValidator[pd.DataFrame]):
     self,
     name: str,
     /,
-    *validators: BaseValidator[Any] | type[BaseValidator[Any]],
+    *validators: BaseValidator[pd.Series[float]]
+    | type[BaseValidator[pd.Series[float]]],
   ) -> None:
     super().__init__(name)
     self.column_name = name
@@ -80,7 +81,7 @@ class Column(BaseValidator[pd.DataFrame]):
     # Optimized path: avoid Series creation
     # Optimization: Direct access by name is much faster than iloc
     try:
-      vals: npt.NDArray[np.floating] = data[self.name].values
+      vals = cast("npt.NDArray[np.floating[Any]]", data[self.name].values)
     except KeyError:
       return ValidationResult(success=False, message=f"Column '{self.name}' not found")
     try:
@@ -138,7 +139,7 @@ class Dtype(BaseValidator[DtypeSupported]):
 
   def __init__(self, dtype: object, /) -> None:
     super().__init__()
-    self.dtype: np.dtype[np.floating[object]] = np.dtype(dtype)
+    self.dtype: np.dtype[Any] = np.dtype(cast("npt.DTypeLike", dtype))
 
   @property
   @override
@@ -172,14 +173,13 @@ class Dtype(BaseValidator[DtypeSupported]):
       return ValidationResult(
         success=False, message=f"Expected dtype {self.dtype}, got {data.dtype}"
       )
-    if isinstance(data, pd.DataFrame):
-      failed_cols = [col for col in data.columns if data[col].dtype != self.dtype]
-      if failed_cols:
-        return ValidationResult(
-          success=False,
-          message=f"Expected all columns to be {self.dtype}, failed: {failed_cols}",
-        )
-      return SUCCESS
+    failed_cols = [col for col in data.columns if data[col].dtype != self.dtype]
+    if failed_cols:
+      return ValidationResult(
+        success=False,
+        message=f"Expected all columns to be {self.dtype}, failed: {failed_cols}",
+      )
+    return SUCCESS
     # Unreachable for properly typed Validated[]
     return ValidationResult(success=False, message="Not a Series or DataFrame")
 
@@ -281,7 +281,8 @@ class Index(BaseValidator["pd.Series[float] | pd.DataFrame"]):
   priority = Priority.STRUCTURAL
 
   def __init__(
-    self, *validators: BaseValidator[Any] | type[BaseValidator[Any]]
+    self,
+    *validators: BaseValidator[pd.Index[float]] | type[BaseValidator[pd.Index[float]]],
   ) -> None:
     super().__init__()
     # Clone validators to ensure state isolation (Prototype Pattern)

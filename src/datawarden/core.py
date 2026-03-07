@@ -66,7 +66,7 @@ class Validatable(Protocol):
   """Object that can be validated (has .values for numpy/numba)."""
 
   @property
-  def values(self) -> np.ndarray[tuple[int, ...], np.dtype[np.floating]]: ...  # pyright: ignore[reportMissingTypeArgument]
+  def values(self) -> np.ndarray[tuple[int, ...], np.dtype[np.floating]]: ...
 
 
 @runtime_checkable
@@ -75,7 +75,7 @@ class Slicable(Validatable, Protocol):
 
   def __len__(self) -> int: ...
 
-  def __getitem__(self, key: Any) -> Any: ...
+  def __getitem__(self, key: object) -> object: ...
 
 
 # Global executor pool to avoid thread spawn overhead and allow concurrent worker counts
@@ -163,7 +163,6 @@ def _get_base_validators(base_type: object) -> list[BaseValidator[PandasLike]]:
 
 class ValidationPlan:
   __slots__ = (
-    "_use_numba_at_init",
     "arg_indices",
     "arg_names",
     "arg_plans",
@@ -173,6 +172,7 @@ class ValidationPlan:
     "has_var_args",
     "parameters",
     "signature",
+    "use_numba_at_init",
     "validation_order",
   )
 
@@ -195,15 +195,15 @@ class ValidationPlan:
       if p.default is not inspect.Parameter.empty
     }
 
-    self._use_numba_at_init = get_config().use_numba
+    self.use_numba_at_init = get_config().use_numba
     self._parse_signature()
 
     # Pre-calculated list of names that have validators
     self.validation_order = [name for name in self.arg_names if name in self.arg_plans]
 
-  def _reoptimize(self, use_numba: bool) -> None:
+  def reoptimize(self, use_numba: bool) -> None:
     """Re-optimize all argument plans with new Numba setting."""
-    self._use_numba_at_init = use_numba
+    self.use_numba_at_init = use_numba
     self._parse_signature()
     self.validation_order = [name for name in self.arg_names if name in self.arg_plans]
 
@@ -447,19 +447,21 @@ def _combine_bounds[T: PandasLike](
   return res
 
 
-def _fuse_numeric[T: PandasLike](
+def _extract_numeric_bounds[T: PandasLike](
   validators: list[BaseValidator[T]],
-) -> list[BaseValidator[T]]:
-  cfg = get_config()
-  # Merge Gt/Ge/Lt/Le on same column/targets
-  # If same target, we can find the tightest bound.
-  # e.g. Ge(5) & Ge(10) -> Ge(10)
-  # e.g. Ge(5) & Le(15) -> Between(5, 15)
-  # For now, just basic LB/UB merging for scalars
-  others: list[BaseValidator[T]] = []
+) -> tuple[
+  float | None,
+  float | None,
+  float | None,
+  float | None,
+  bool,
+  bool,
+  list[BaseValidator[T]],
+]:
   gt_v, ge_v, lt_v, le_v = None, None, None, None
   has_not_nan = False
   has_finite = False
+  others: list[BaseValidator[T]] = []
 
   for v in validators:
     if isinstance(v, Gt) and v.targets is None:
@@ -481,17 +483,15 @@ def _fuse_numeric[T: PandasLike](
   if has_finite:
     has_not_nan = False
 
-  res = _combine_bounds(gt_v, ge_v, lt_v, le_v)
+  return gt_v, ge_v, lt_v, le_v, has_not_nan, has_finite, others
 
-  # Optimization: If Numba is enabled and we have multiple numeric validators,
-  # we might want to keep them separate for Numba fusion to handle them.
-  # However, contradiction detection (in _combine_bounds) is still essential.
-  # If we are NOT in Numba mode, we always want the simplified version.
-  if cfg.use_numba and len(res) + len(others) >= NUMBA_FUSION_THRESHOLD:
-    # If it's a candidate for fusion, we can skip the simplified version
-    # but ONLY if it didn't find a contradiction.
-    # Actually, returning simplified 'res' is almost always better as it reduces work.
-    pass
+
+def _fuse_numeric[T: PandasLike](
+  validators: list[BaseValidator[T]],
+) -> list[BaseValidator[T]]:
+  gt_v, ge_v, lt_v, le_v, has_not_nan, _, others = _extract_numeric_bounds(validators)
+
+  res = _combine_bounds(gt_v, ge_v, lt_v, le_v)
 
   if has_not_nan and not any(x is not None for x in [gt_v, ge_v, lt_v, le_v]):
     res.append(cast("BaseValidator[T]", NotNaN))
@@ -714,8 +714,8 @@ def validate[**P, R](func: Callable[P, R]) -> Callable[P, R]:
       return func(*args, **kwargs)
 
     # Re-optimize if Numba setting changed since plan creation
-    if cfg.use_numba != plan._use_numba_at_init:
-      plan._reoptimize(cfg.use_numba)
+    if cfg.use_numba != plan.use_numba_at_init:
+      plan.reoptimize(cfg.use_numba)
 
     try:
       plan.validate_args(*args, **kwargs)

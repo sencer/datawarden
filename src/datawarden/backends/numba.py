@@ -446,11 +446,6 @@ class DiskCacheBackend:
 
     # Ensure we have a native numpy array for Numba
     arr = data.to_numpy()
-    if not isinstance(arr, np.ndarray):
-      # Fallback for unsupported extension types
-      raise NotImplementedError(f"Unsupported array type: {type(arr)}")
-
-    # Check dtype compatibility
     if arr.dtype.kind not in "if":
       raise NotImplementedError(f"Unsupported dtype: {arr.dtype}")
 
@@ -518,10 +513,6 @@ class DiskCacheBackend:
     cfg = get_config()
     # Ensure we have a native numpy array for Numba
     arr = data.to_numpy()
-    if not isinstance(arr, np.ndarray):
-      # Fallback for unsupported extension types
-      raise NotImplementedError(f"Unsupported array type: {type(arr)}")
-
     if arr.dtype.kind not in "if":
       raise NotImplementedError(f"Unsupported dtype: {arr.dtype}")
 
