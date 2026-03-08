@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast, override
+import datetime
+from typing import TYPE_CHECKING, override
 
 import numpy as np
 import pandas as pd
@@ -17,6 +18,8 @@ MIN_LEN_FOR_DIFF = 2
 
 
 class MaxDiff[T: (pd.Series[float], pd.DataFrame)](NumericValidator[T]):
+  """Validates that consecutive differences do not exceed `value`."""
+
   __slots__ = ("value",)
   priority = Priority.VECTORIZED
 
@@ -42,7 +45,6 @@ class MaxDiff[T: (pd.Series[float], pd.DataFrame)](NumericValidator[T]):
     arr_name: str = "arr",
     is_range_index: bool = False,
   ) -> None:
-    # Per-element diff check: first element passes, rest check |arr[i] - arr[i-1]| <= value
     if is_range_index and arr_name == "index_arr":
       parts.append(f"((i == 0) or (abs(r_step) <= {self.value}))")
     else:
@@ -53,7 +55,6 @@ class MaxDiff[T: (pd.Series[float], pd.DataFrame)](NumericValidator[T]):
     if len(data) == 0:
       return np.array([], dtype=np.bool_)
 
-    # Optimize: avoid copy if no NaNs are present
     has_nans = np.isnan(data).any()
 
     if data.ndim == 1:
@@ -63,14 +64,12 @@ class MaxDiff[T: (pd.Series[float], pd.DataFrame)](NumericValidator[T]):
       mask[0] = True
       mask[1:] = diffs <= self.value
     else:
-      # For DataFrame (2D), diff along rows
       filled = pd.DataFrame(data, copy=False).ffill().values if has_nans else data
       diffs = np.abs(np.diff(filled, axis=0))
       mask = np.empty(data.shape, dtype=np.bool_)
       mask[0, :] = True
       mask[1:, :] = diffs <= self.value
 
-    # Reject NaNs by default (they will be allowed if wrapped in Or(..., IsNaN))
     if has_nans:
       mask &= ~np.isnan(data)
     return mask
@@ -108,7 +107,6 @@ class MinDiff[T: (pd.Series[float], pd.DataFrame)](NumericValidator[T]):
     arr_name: str = "arr",
     is_range_index: bool = False,
   ) -> None:
-    # Per-element diff check: first element passes, rest check |arr[i] - arr[i-1]| >= value
     if is_range_index and arr_name == "index_arr":
       parts.append(f"((i == 0) or (abs(r_step) >= {self.value}))")
     else:
@@ -119,7 +117,6 @@ class MinDiff[T: (pd.Series[float], pd.DataFrame)](NumericValidator[T]):
     if len(data) == 0:
       return np.array([], dtype=np.bool_)
 
-    # Optimize
     has_nans = np.isnan(data).any()
 
     if data.ndim == 1:
@@ -129,14 +126,12 @@ class MinDiff[T: (pd.Series[float], pd.DataFrame)](NumericValidator[T]):
       mask[0] = True
       mask[1:] = diffs >= self.value
     else:
-      # For DataFrame (2D), diff along rows
       filled = pd.DataFrame(data, copy=False).ffill().values if has_nans else data
       diffs = np.abs(np.diff(filled, axis=0))
       mask = np.empty(data.shape, dtype=np.bool_)
       mask[0, :] = True
       mask[1:, :] = diffs >= self.value
 
-    # Reject NaNs by default
     if has_nans:
       mask &= ~np.isnan(data)
     return mask
@@ -146,159 +141,9 @@ class MinDiff[T: (pd.Series[float], pd.DataFrame)](NumericValidator[T]):
     return f"MinDiff({self.value})"
 
 
-class NoTimeGaps(BaseValidator["pd.Series[float] | pd.Index[float]"]):
-  __slots__ = ("freq",)
-  priority = Priority.COMPLEX
-
-  def __init__(self, freq: object, /) -> None:
-    super().__init__()
-    self.freq = pd.to_timedelta(freq) if isinstance(freq, str) else freq
-
-  @property
-  @override
-  def _state_key(self) -> str:
-    return f"notimegaps_{id(self)}_last_ts"
-
-  @override
-  def validate(
-    self, data: pd.Series[float] | pd.Index[float], context: ValidationContext
-  ) -> ValidationResult:
-    vals = data.values
-
-    if not np.issubdtype(vals.dtype, np.datetime64):
-      return ValidationResult(
-        success=False, message="NoTimeGaps requires datetime64 data"
-      )
-
-    if len(vals) == 0:
-      return SUCCESS
-
-    # Convert to nanoseconds int64 for faster diff
-    ts: npt.NDArray[np.int64] = vals.view(np.int64)
-
-    last_ts = cast("int | None", context.extra.get(self._state_key))
-    expected_ns = (
-      int(cast("pd.Timedelta", self.freq).total_seconds() * 1e9)
-      if hasattr(self.freq, "total_seconds")
-      else int(cast("int", self.freq))
-    )
-
-    if last_ts is not None:
-      # Check gap between chunks
-      first_gap = ts[0] - last_ts
-      if first_gap != expected_ns:
-        return ValidationResult(
-          success=False,
-          message=f"Time gap found between chunks (expected {self.freq})",
-        )
-
-    if len(vals) < MIN_LEN_FOR_DIFF:
-      context.extra[self._state_key] = ts[-1]
-      return SUCCESS
-
-    diffs = np.diff(ts)
-    mask_diffs = cast("npt.NDArray[np.bool_]", diffs == expected_ns)
-
-    context.extra[self._state_key] = ts[-1]
-
-    if mask_diffs.all():
-      return SUCCESS
-
-    # Create a full mask
-    full_mask = np.empty(len(vals), dtype=np.bool_)
-    full_mask[0] = True
-    full_mask[1:] = mask_diffs
-
-    pd_mask: pd.Series[bool] = pd.Series(
-      full_mask,
-      index=data if isinstance(data, pd.Index) else data.index,
-      copy=False,
-    )
-
-    return ValidationResult(
-      success=False,
-      message=f"Time gaps found (expected exactly {self.freq})",
-      mask=pd_mask,
-    )
-
-  @override
-  def __str__(self) -> str:
-    return f"NoTimeGaps({self.freq})"
-
-
-class MaxGap(BaseValidator["pd.Series[float] | pd.Index[float]"]):
-  __slots__ = ("duration",)
-  priority = Priority.COMPLEX
-
-  def __init__(self, duration: object, /) -> None:
-    super().__init__()
-    self.duration = pd.to_timedelta(duration) if isinstance(duration, str) else duration
-
-  @property
-  @override
-  def _state_key(self) -> str:
-    return f"maxgap_{id(self)}_last_ts"
-
-  @override
-  def validate(
-    self, data: pd.Series[float] | pd.Index[float], context: ValidationContext
-  ) -> ValidationResult:
-    vals = data.values
-
-    if not np.issubdtype(vals.dtype, np.datetime64):
-      return ValidationResult(success=False, message="MaxGap requires datetime64 data")
-
-    if len(vals) == 0:
-      return SUCCESS
-
-    ts: npt.NDArray[np.int64] = vals.view(np.int64)
-    max_ns = (
-      int(cast("pd.Timedelta", self.duration).total_seconds() * 1e9)
-      if hasattr(self.duration, "total_seconds")
-      else int(cast("int", self.duration))
-    )
-
-    last_ts = cast("int | None", context.extra.get(self._state_key))
-    if last_ts is not None and (ts[0] - last_ts) > max_ns:
-      return ValidationResult(
-        success=False,
-        message=f"Time gap found between chunks (max {self.duration})",
-      )
-
-    if len(vals) < MIN_LEN_FOR_DIFF:
-      context.extra[self._state_key] = ts[-1]
-      return SUCCESS
-
-    diffs = np.diff(ts)
-    mask_diffs = diffs <= max_ns
-
-    context.extra[self._state_key] = ts[-1]
-
-    if mask_diffs.all():
-      return SUCCESS
-
-    full_mask = np.empty(len(vals), dtype=np.bool_)
-    full_mask[0] = True
-    full_mask[1:] = mask_diffs
-
-    pd_mask: pd.Series[bool] = pd.Series(
-      full_mask,
-      index=data if isinstance(data, pd.Index) else data.index,
-      copy=False,
-    )
-
-    return ValidationResult(
-      success=False,
-      message=f"Time gap larger than {self.duration} found",
-      mask=pd_mask,
-    )
-
-  @override
-  def __str__(self) -> str:
-    return f"MaxGap({self.duration})"
-
-
 class Unique[T: (pd.Series[float], pd.Index[float])](BaseValidator[T]):
+  """Validates that all values are unique."""
+
   __slots__ = ()
   priority = Priority.COMPLEX
 
@@ -308,8 +153,6 @@ class Unique[T: (pd.Series[float], pd.Index[float])](BaseValidator[T]):
     if data.is_unique:
       return SUCCESS
 
-    # Finding duplicated rows for the mask
-    # duplicated() returns True for duplicates (Fail). We want ~duplicated for Pass.
     if isinstance(data, pd.Index):
       duplicated: pd.Series[bool] = pd.Series(
         data.duplicated(keep=False), index=data, copy=False
@@ -326,20 +169,39 @@ class Unique[T: (pd.Series[float], pd.Index[float])](BaseValidator[T]):
     return "Unique"
 
 
-class MonoUp(BaseValidator["pd.Series[float] | pd.Index[float]"]):
+class StateValidator[T: (pd.Series[object], pd.Index)](BaseValidator[T]):
+  """Base class for validators that maintain state across chunks.
+
+  These validators use `ValidationContext` to store the last value from a previous
+  chunk to ensure continuity (e.g., monotonicity) across streaming data.
+  """
+
   __slots__ = ()
-  priority = Priority.COMPLEX
+
+  def _get_last_val(self, context: ValidationContext) -> object | None:
+    return context.extra.get(self._state_key)
+
+  def _set_last_val(self, context: ValidationContext, val: object) -> None:
+    context.extra[self._state_key] = val
+
+
+class MonoUp[T: (pd.Series[float], pd.Index)](StateValidator[T]):
+  """Validates that a sequence is monotonically increasing.
+
+  Supports stateful validation across chunks when using `ValidationContext`.
+  """
+
+  __slots__ = ("strict",)
+
+  def __init__(self, strict: bool = False, name: str | None = None) -> None:
+    super().__init__(name)
+    self.strict = strict
+    self.complexity = 1
 
   @property
   @override
   def numba_supported(self) -> bool:
-    return True
-
-  @property
-  @override
-  def numba_fusable(self) -> bool:
-    # Can participate in Numba fusion when composed with other validators.
-    return True
+    return not self.strict  # Numba loop supports non-strict by default
 
   @override
   def build_numba_expr(
@@ -349,76 +211,59 @@ class MonoUp(BaseValidator["pd.Series[float] | pd.Index[float]"]):
     arr_name: str = "arr",
     is_range_index: bool = False,
   ) -> None:
-    # Per-element monotonicity check: first element passes, rest check arr[i-1] <= arr[i]
-    # Using 'arr' and 'i' which are the loop variables in the generated kernel
     if is_range_index and arr_name == "index_arr":
       parts.append("((i == 0) or (r_step >= 0))")
     else:
       parts.append(f"((i == 0) or ({arr_name}[i-1] <= {target}))")
 
-  @property
   @override
-  def _state_key(self) -> str:
-    return f"monoup_{id(self)}_last"
-
-  @override
-  def validate(
-    self, data: pd.Series[float] | pd.Index[float], context: ValidationContext
-  ) -> ValidationResult:
+  def validate(self, data: T, context: ValidationContext) -> ValidationResult:
     if len(data) == 0:
       return SUCCESS
 
-    vals = cast("npt.NDArray[np.floating[Any]]", data.values)
-    last_val = context.extra.get(self._state_key)
+    if self.strict:
+      success = bool((data.to_series().diff().dropna() > 0).all())
+    else:
+      success = bool(data.is_monotonic_increasing)
+
+    if not success:
+      return ValidationResult(success=False, message=str(self))
+
+    last_val = self._get_last_val(context)
     if last_val is not None:
-      res = bool(vals[0] >= last_val)
-      # If result is False or NA, it's a failure (strict)
-      if not res:
+      first_val = data[0] if isinstance(data, pd.Index) else data.iloc[0]
+      cross_success = (first_val > last_val) if self.strict else (first_val >= last_val)
+      if not cross_success:
         return ValidationResult(
-          success=False, message="Monotonicity broken between chunks"
+          success=False, message=f"{self} failed cross-chunk continuity"
         )
 
-    if pd.Series(vals).is_monotonic_increasing:
-      context.extra[self._state_key] = vals[-1]
-      return SUCCESS
-
-    # Per-element mask for better error reporting and logic combination
-    # Use ffill to ignore NaNs for monotonicity check
-    has_nans = pd.isna(vals).any()
-    filled = pd.Series(vals, copy=False).ffill().values if has_nans else vals
-    mask = np.empty(len(vals), dtype=np.bool_)
-    mask[0] = True
-    mask[1:] = (pd.Series(filled[1:]) >= pd.Series(filled[:-1])).values
-
-    # Reject NaNs by default (allowed if wrapped in Or(..., IsNaN))
-    if has_nans:
-      mask &= pd.notna(vals)
-
-    context.extra[self._state_key] = vals[-1]
-    pd_mask = pd.Series(mask, index=data if isinstance(data, pd.Index) else data.index)
-    return ValidationResult(
-      success=False, message="Not monotonically increasing", mask=pd_mask
+    self._set_last_val(
+      context, data[-1] if isinstance(data, pd.Index) else data.iloc[-1]
     )
+    return SUCCESS
 
   @override
   def __str__(self) -> str:
-    return "MonoUp"
+    return "MonoUp(strict=True)" if self.strict else "MonoUp"
 
 
-class MonoDown(BaseValidator["pd.Series[float] | pd.Index[float]"]):
-  __slots__ = ()
-  priority = Priority.COMPLEX
+class MonoDown[T: (pd.Series[float], pd.Index)](StateValidator[T]):
+  """Validates that a sequence is monotonically decreasing.
+
+  Supports stateful validation across chunks.
+  """
+
+  __slots__ = ("strict",)
+
+  def __init__(self, strict: bool = False, name: str | None = None) -> None:
+    super().__init__(name)
+    self.strict = strict
 
   @property
   @override
   def numba_supported(self) -> bool:
-    return True
-
-  @property
-  @override
-  def numba_fusable(self) -> bool:
-    # Can participate in Numba fusion when composed with other validators.
-    return True
+    return not self.strict
 
   @override
   def build_numba_expr(
@@ -428,56 +273,124 @@ class MonoDown(BaseValidator["pd.Series[float] | pd.Index[float]"]):
     arr_name: str = "arr",
     is_range_index: bool = False,
   ) -> None:
-    # Per-element monotonicity check: first element passes, rest check arr[i-1] >= arr[i]
     if is_range_index and arr_name == "index_arr":
       parts.append("((i == 0) or (r_step <= 0))")
     else:
       parts.append(f"((i == 0) or ({arr_name}[i-1] >= {target}))")
 
-  @property
   @override
-  def _state_key(self) -> str:
-    return f"monodown_{id(self)}_last"
-
-  @override
-  def validate(
-    self, data: pd.Series[float] | pd.Index[float], context: ValidationContext
-  ) -> ValidationResult:
+  def validate(self, data: T, context: ValidationContext) -> ValidationResult:
     if len(data) == 0:
       return SUCCESS
 
-    vals = cast("npt.NDArray[np.floating[Any]]", data.values)
-    last_val = context.extra.get(self._state_key)
+    if self.strict:
+      success = bool((data.to_series().diff().dropna() < 0).all())
+    else:
+      success = bool(data.is_monotonic_decreasing)
+
+    if not success:
+      return ValidationResult(success=False, message=str(self))
+
+    last_val = self._get_last_val(context)
     if last_val is not None:
-      res = bool(vals[0] <= last_val)
-      # If result is False or NA, it's a failure (strict)
-      if res is False or (res is not True and pd.isna(res)):
+      first_val = data[0] if isinstance(data, pd.Index) else data.iloc[0]
+      cross_success = (first_val < last_val) if self.strict else (first_val <= last_val)
+      if not cross_success:
         return ValidationResult(
-          success=False, message="Monotonicity broken between chunks"
+          success=False, message=f"{self} failed cross-chunk continuity"
         )
 
-    if pd.Series(vals).is_monotonic_decreasing:
-      context.extra[self._state_key] = vals[-1]
-      return SUCCESS
-
-    # Per-element mask
-    # Use ffill to ignore NaNs
-    has_nans = pd.isna(vals).any()
-    filled = pd.Series(vals, copy=False).ffill().values if has_nans else vals
-    mask = np.empty(len(vals), dtype=np.bool_)
-    mask[0] = True
-    mask[1:] = (pd.Series(filled[1:]) <= pd.Series(filled[:-1])).values
-
-    # Reject NaNs
-    if has_nans:
-      mask &= pd.notna(vals)
-
-    context.extra[self._state_key] = vals[-1]
-    pd_mask = pd.Series(mask, index=data if isinstance(data, pd.Index) else data.index)
-    return ValidationResult(
-      success=False, message="Not monotonically decreasing", mask=pd_mask
+    self._set_last_val(
+      context, data[-1] if isinstance(data, pd.Index) else data.iloc[-1]
     )
+    return SUCCESS
 
   @override
   def __str__(self) -> str:
-    return "MonoDown"
+    return "MonoDown(strict=True)" if self.strict else "MonoDown"
+
+
+class NoTimeGaps[T: (pd.Series[datetime.datetime], pd.DatetimeIndex)](
+  StateValidator[T]
+):
+  """Validates that a datetime sequence has no gaps relative to a frequency."""
+
+  __slots__ = ("freq",)
+
+  def __init__(self, freq: str | pd.DateOffset, name: str | None = None) -> None:
+    super().__init__(name)
+    self.freq = freq
+
+  @override
+  def validate(self, data: T, context: ValidationContext) -> ValidationResult:
+    if len(data) == 0:
+      return SUCCESS
+
+    actual_diffs = (
+      pd.Series(data).diff().dropna()
+      if isinstance(data, pd.DatetimeIndex)
+      else data.diff().dropna()
+    )
+    expected_diff = pd.to_timedelta(
+      self.freq if isinstance(self.freq, str) else self.freq.kwds.get("nanos", 0)
+    )
+
+    if not (actual_diffs == expected_diff).all():
+      return ValidationResult(
+        success=False, message=f"Time gaps detected (freq={self.freq})"
+      )
+
+    last_time = self._get_last_val(context)
+    if last_time is not None:
+      first_time = data[0] if isinstance(data, pd.DatetimeIndex) else data.iloc[0]
+      if (first_time - last_time) != expected_diff:
+        return ValidationResult(
+          success=False, message="Time gap between chunks detected"
+        )
+
+    self._set_last_val(
+      context, data[-1] if isinstance(data, pd.DatetimeIndex) else data.iloc[-1]
+    )
+    return SUCCESS
+
+  @override
+  def __str__(self) -> str:
+    return f"NoTimeGaps({self.freq})"
+
+
+class MaxGap[T: (pd.Series[datetime.datetime], pd.DatetimeIndex)](StateValidator[T]):
+  """Validates that no time gap exceeds a maximum duration."""
+
+  __slots__ = ("limit",)
+
+  def __init__(self, limit: str | pd.Timedelta, name: str | None = None) -> None:
+    super().__init__(name)
+    self.limit = pd.to_timedelta(limit)
+
+  @override
+  def validate(self, data: T, context: ValidationContext) -> ValidationResult:
+    if len(data) == 0:
+      return SUCCESS
+
+    actual_diffs = (
+      pd.Series(data).diff().dropna()
+      if isinstance(data, pd.DatetimeIndex)
+      else data.diff().dropna()
+    )
+    if (actual_diffs > self.limit).any():
+      return ValidationResult(success=False, message=f"Gap exceeds {self.limit}")
+
+    last_time = self._get_last_val(context)
+    if last_time is not None:
+      first_time = data[0] if isinstance(data, pd.DatetimeIndex) else data.iloc[0]
+      if (first_time - last_time) > self.limit:
+        return ValidationResult(success=False, message="Cross-chunk gap violation")
+
+    self._set_last_val(
+      context, data[-1] if isinstance(data, pd.DatetimeIndex) else data.iloc[-1]
+    )
+    return SUCCESS
+
+  @override
+  def __str__(self) -> str:
+    return f"MaxGap({self.limit})"

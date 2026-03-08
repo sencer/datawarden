@@ -29,6 +29,11 @@ if TYPE_CHECKING:
 
 
 class NumericValidator[T: (pd.Series[float], pd.DataFrame, pd.Index)](BaseValidator[T]):
+  """Base class for validators that perform numeric comparisons.
+
+  Optimized for vectorized execution via NumPy and JIT acceleration via Numba.
+  """
+
   __slots__ = ("targets",)
   priority = Priority.VECTORIZED
 
@@ -46,54 +51,9 @@ class NumericValidator[T: (pd.Series[float], pd.DataFrame, pd.Index)](BaseValida
   def _get_mask_numpy(self, data: npt.NDArray[np.floating]) -> npt.NDArray[np.bool_]:
     raise NotImplementedError
 
-    vals = data.values
-    mask = self._get_mask_numpy(vals)
-
-    if self._check_mask_success(mask):
-      return SUCCESS
-
-    return ValidationResult(
-      success=False, message=str(self), mask=self._build_error_mask(data, mask)
-    )
-
-  @staticmethod
-  def _check_mask_success(mask: npt.NDArray[np.bool_]) -> bool:
-    # High-performance branching: type() is faster than isinstance() for exact matches
-    mask_type = type(mask)
-    if mask_type is np.ndarray:
-      return bool(mask.all())
-
-    if hasattr(mask, "all"):
-      # Pandas ExtensionArrays (like BooleanArray) default to skipna=True.
-      # We force skipna=False to ensure nulls are treated as failures.
-      try:
-        res = mask.all(skipna=False)
-        # In pandas, True is Success, False or <NA> is Failure.
-        return res is True or res is np.True_
-      except TypeError:
-        # Fallback for types that don't support skipna
-        return bool(mask.all())
-
-    return bool(mask)
-
-  @staticmethod
-  def _build_error_mask[T: (pd.Series[float], pd.DataFrame, pd.Index)](
-    data: T, mask: npt.NDArray[np.bool_]
-  ) -> pd.Series[bool] | pd.DataFrame | None:
-    # On failure, we might want a Pandas mask for better error reporting
-    if isinstance(data, pd.Series):
-      return pd.Series(mask, index=data.index, copy=False)
-
-    if isinstance(data, pd.DataFrame):
-      return pd.DataFrame(mask, index=data.index, columns=data.columns, copy=False)
-
-    if isinstance(data, pd.Index):
-      return pd.Series(mask, index=data, copy=False)
-
-    return None
-
   @override
   def validate(self, data: T, context: ValidationContext) -> ValidationResult:  # noqa: PLR0911
+    """Validate numeric data with O(1) fast paths for RangeIndex and JIT acceleration."""
     del context  # Unused
     # Fast path for RangeIndex - O(1) bounds check
     if isinstance(data, pd.RangeIndex):
@@ -140,6 +100,16 @@ class NumericValidator[T: (pd.Series[float], pd.DataFrame, pd.Index)](BaseValida
 class ComparisonValidator[T: (pd.Series[float], pd.DataFrame, pd.Index)](
   NumericValidator[T]
 ):
+  """Validator for standard comparisons (>, >=, <, <=, ==, !=).
+
+  Supports both scalar comparison and multi-column comparison.
+
+  Examples:
+    >>> Gt(0)  # All values > 0
+    >>> Gt('col_a', 'col_b')  # col_a > col_b
+    >>> Ge('high', 'low', 'open')  # high >= low AND low >= open
+  """
+
   __slots__ = ("value",)
   op_str: str
 
@@ -181,19 +151,13 @@ class ComparisonValidator[T: (pd.Series[float], pd.DataFrame, pd.Index)](
     parts: list[str],
     is_range_index: bool = False,
   ) -> None:
-    """Build column-mode Numba expression for multi-column comparison.
-
-    For Ge['a', 'b'], generates: (arr[i] >= arr[i + n_rows * 1])
-    For Ge['a', 'b', 'c'], generates: (arr[i] >= arr[i + n_rows * 1]) and (arr[i + n_rows * 1] >= arr[i + n_rows * 2])
-    """
+    """Build column-mode Numba expression for multi-column comparison."""
     if self.targets is None:
       # Scalar mode - use regular expression
       parts.append(f"({arr_name}[{idx_name}] {self.op_str} {self.value})")
       return
 
     # Multi-column mode: generate chained comparison expressions
-    # ctx.col_map maps column name to column index
-
     parts.append("(")
     for i in range(1, len(self.targets)):
       if i > 1:
@@ -230,7 +194,6 @@ class ComparisonValidator[T: (pd.Series[float], pd.DataFrame, pd.Index)](
     if cfg.use_numba and n_rows >= cfg.numba_threshold:
       try:
         # Build column map using actual column positions in the DataFrame
-        # This avoids copying the DataFrame - we use the original raveled data
         cols_list = list(data.columns)
         col_map = {col: cols_list.index(col) for col in self.targets}
         success, mask = run_numba_validation_column_mode(
@@ -241,18 +204,10 @@ class ComparisonValidator[T: (pd.Series[float], pd.DataFrame, pd.Index)](
         if mask is not None:
           pd_mask: pd.Series[bool] = pd.Series(mask, index=data.index, copy=False)
           return ValidationResult(success=False, message=str(self), mask=pd_mask)
-        # Fall through to pandas path if mask not available
-      except (
-        RuntimeError,
-        ValueError,
-        TypeError,
-        ImportError,
-        AttributeError,
-      ):
-        pass  # Fall through to pandas path
+      except Exception:  # noqa: BLE001, S110
+        pass
 
     # Fallback: N-ary comparison with pandas
-    # Ge("a", "b", "c") validates a >= b AND b >= c
     mask_result: pd.Series[bool] = pd.Series(True, index=data.index)
     for i in range(1, len(self.targets)):
       res = self._compare(data[self.targets[i - 1]], data[self.targets[i]])
@@ -275,6 +230,8 @@ MAX_SMART_NEGATION_TARGETS = 2
 
 
 class Gt[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
+  """Greater Than (>) validator."""
+
   __slots__ = ()
   op_str = ">"
 
@@ -309,6 +266,8 @@ class Gt[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
 
 
 class Ge[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
+  """Greater than or Equal (>=) validator."""
+
   __slots__ = ()
   op_str = ">="
 
@@ -343,6 +302,8 @@ class Ge[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
 
 
 class Lt[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
+  """Less Than (<) validator."""
+
   __slots__ = ()
   op_str = "<"
 
@@ -377,6 +338,8 @@ class Lt[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
 
 
 class Le[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
+  """Less than or Equal (<=) validator."""
+
   __slots__ = ()
   op_str = "<="
 
@@ -411,6 +374,8 @@ class Le[T: (pd.Series[float], pd.DataFrame, pd.Index)](ComparisonValidator[T]):
 
 
 class Eq[T: (pd.Series[float], pd.DataFrame, pd.Index)](NumericValidator[T]):
+  """Equal (==) validator."""
+
   __slots__ = ("value",)
 
   def __init__(self, value: object, /) -> None:
@@ -450,6 +415,8 @@ class Eq[T: (pd.Series[float], pd.DataFrame, pd.Index)](NumericValidator[T]):
 
 
 class Ne[T: (pd.Series[float], pd.DataFrame, pd.Index)](NumericValidator[T]):
+  """Not Equal (!=) validator."""
+
   __slots__ = ("value",)
 
   def __init__(self, value: object, /) -> None:
@@ -489,6 +456,8 @@ class Ne[T: (pd.Series[float], pd.DataFrame, pd.Index)](NumericValidator[T]):
 
 
 class IsNaN[T: (pd.Series[float], pd.DataFrame, pd.Index)](NumericValidator[T]):
+  """Validates that all values are NaN."""
+
   __slots__ = ()
 
   @override
@@ -524,6 +493,8 @@ class IsNaN[T: (pd.Series[float], pd.DataFrame, pd.Index)](NumericValidator[T]):
 
 
 class NotNaN[T: (pd.Series[float], pd.DataFrame, pd.Index)](NumericValidator[T]):
+  """Validates that no values are NaN."""
+
   __slots__ = ()
 
   @override
@@ -564,6 +535,8 @@ NotIsNaN = NotNaN
 
 
 class Positive[T: (pd.Series[float], pd.DataFrame, pd.Index)](Gt[T]):
+  """Values > 0."""
+
   __slots__ = ()
 
   def __init__(self) -> None:
@@ -579,6 +552,8 @@ class Positive[T: (pd.Series[float], pd.DataFrame, pd.Index)](Gt[T]):
 
 
 class NonPositive[T: (pd.Series[float], pd.DataFrame, pd.Index)](Le[T]):
+  """Values <= 0."""
+
   __slots__ = ()
 
   def __init__(self) -> None:
@@ -594,6 +569,8 @@ class NonPositive[T: (pd.Series[float], pd.DataFrame, pd.Index)](Le[T]):
 
 
 class Negative[T: (pd.Series[float], pd.DataFrame, pd.Index)](Lt[T]):
+  """Values < 0."""
+
   __slots__ = ()
 
   def __init__(self) -> None:
@@ -609,6 +586,8 @@ class Negative[T: (pd.Series[float], pd.DataFrame, pd.Index)](Lt[T]):
 
 
 class NonNegative[T: (pd.Series[float], pd.DataFrame, pd.Index)](Ge[T]):
+  """Values >= 0."""
+
   __slots__ = ()
 
   def __init__(self) -> None:
@@ -624,6 +603,8 @@ class NonNegative[T: (pd.Series[float], pd.DataFrame, pd.Index)](Ge[T]):
 
 
 class Finite[T: (pd.Series[float], pd.DataFrame, pd.Index)](NumericValidator[T]):
+  """Validates that all values are finite (not NaN, not Inf)."""
+
   __slots__ = ()
 
   @override
@@ -655,6 +636,8 @@ class Finite[T: (pd.Series[float], pd.DataFrame, pd.Index)](NumericValidator[T])
 
 
 class Infinite[T: (pd.Series[float], pd.DataFrame, pd.Index)](NumericValidator[T]):
+  """Validates that all values are infinite."""
+
   __slots__ = ()
 
   @property
