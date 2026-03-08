@@ -31,7 +31,7 @@ class TestValidatedDecorator:
 
     valid_data = pd.Series([1.0, 2.0, 3.0])
     result = process(valid_data)
-    assert result == 6.0
+    assert result == pytest.approx(6.0)
 
   def test_function_rejects_invalid_data(self) -> None:
     """Test @validate decorator rejects invalid data."""
@@ -54,7 +54,7 @@ class TestValidatedDecorator:
     # Valid data
     valid_data = pd.Series([1.0, 2.0, 3.0])
     result = process(valid_data)
-    assert result == 6.0
+    assert result == pytest.approx(6.0)
 
     # Fails Finite check (Inf)
     with pytest.raises(ValidationError):
@@ -102,7 +102,7 @@ class TestValidatedDecorator:
 
     processor = Processor()
     result = processor.process(pd.Series([1.0, 2.0, 3.0]))
-    assert result == 6.0
+    assert result == pytest.approx(6.0)
 
   def test_optional_validated_argument(self) -> None:
     """Test optional validated argument."""
@@ -114,9 +114,9 @@ class TestValidatedDecorator:
       return data.sum()
 
     # Pass None
-    assert process(None) == 0.0
+    assert process(None) == pytest.approx(0.0)
     # Pass valid
-    assert process(pd.Series([1.0, 2.0])) == 3.0
+    assert process(pd.Series([1.0, 2.0])) == pytest.approx(3.0)
     # Pass invalid
     with pytest.raises(ValidationError):
       process(pd.Series([np.nan, 1.0]))
@@ -168,9 +168,9 @@ class TestValidatedDecorator:
       return data.sum()
 
     # Use default
-    assert process() == 3.0
+    assert process() == pytest.approx(3.0)
     # Override with valid
-    assert process(pd.Series([3.0, 4.0])) == 7.0
+    assert process(pd.Series([3.0, 4.0])) == pytest.approx(7.0)
     # Override with invalid
     with pytest.raises(ValidationError):
       process(pd.Series([np.inf, 1.0]))
@@ -244,7 +244,7 @@ class TestComplexValidations:
 
     # DataFrame with NaNs in 'a' -> | IsNaN should allow NaNs
     df = pd.DataFrame({"a": [1.0, np.nan, 3.0]})
-    assert process(df) == 4.0
+    assert process(df) == pytest.approx(4.0)
 
     # Negative value should still fail
     with pytest.raises(ValidationError):
@@ -276,11 +276,11 @@ class TestEdgeCases:
 
     # Positional
     result = process(valid_data)
-    assert result == 6.0
+    assert result == pytest.approx(6.0)
 
     # Keyword
     result = process(data=valid_data)
-    assert result == 6.0
+    assert result == pytest.approx(6.0)
 
 
 class TestOptInStrictness:
@@ -294,7 +294,7 @@ class TestOptInStrictness:
       return data.sum()
 
     # Valid data
-    assert process(pd.Series([1, 2, 3])) == 6.0
+    assert process(pd.Series([1, 2, 3])) == pytest.approx(6.0)
 
     # NaN data fails
     with pytest.raises(ValidationError):
