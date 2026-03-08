@@ -25,12 +25,6 @@ type PredicateResult = (
 
 
 class Is[T: PandasLike](BaseValidator[T]):
-  """Validates data against a custom predicate function.
-
-  Example:
-    >>> Is(lambda x: x.sum() > 0)
-  """
-
   __slots__ = ("predicate",)
   priority = Priority.DEFAULT
 
@@ -43,20 +37,27 @@ class Is[T: PandasLike](BaseValidator[T]):
     super().__init__(name or getattr(predicate, "__name__", str(predicate)))
     self.predicate = predicate
 
+  @property
+  @override
+  def numba_supported(self) -> bool:
+    return False
+
   @override
   def validate(self, data: T, context: ValidationContext) -> ValidationResult:
     del context  # Unused
     try:
       res = self.predicate(data)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 (User predicate can raise anything)
       return ValidationResult(
         success=False, message=f"Is({self.name}) raised exception: {e}"
       )
 
+    # Handle numpy array / pandas object
     if hasattr(res, "all"):
       all_result = cast("Any", res).all()
       if all_result is True or all_result is np.True_:
         return SUCCESS
+      # res should be a mask here
       if isinstance(res, (pd.Series, pd.DataFrame)):
         return ValidationResult(
           success=False, message=f"Is({self.name}) failed", mask=res
@@ -74,20 +75,19 @@ class Is[T: PandasLike](BaseValidator[T]):
 
 
 class Rows(BaseValidator[pd.DataFrame]):
-  """Validates DataFrame rows using a predicate.
-
-  Example:
-    >>> Rows(lambda row: row['a'] > row['b'])
-  """
-
   __slots__ = ("predicate",)
   priority = Priority.SLOW
 
   def __init__(
-    self, predicate: Callable[[pd.Series[Any]], bool], /, name: str | None = None
+    self, predicate: Callable[[pd.Series[float]], bool], /, name: str | None = None
   ) -> None:
     super().__init__(name or getattr(predicate, "__name__", str(predicate)))
     self.predicate = predicate
+
+  @property
+  @override
+  def numba_supported(self) -> bool:
+    return False
 
   @override
   def validate(
@@ -95,8 +95,9 @@ class Rows(BaseValidator[pd.DataFrame]):
   ) -> ValidationResult:
     del context  # Unused
     try:
+      # Result of apply along axis 1 is a Series of results (usually bools)
       mask: pd.Series[bool] = data.apply(self.predicate, axis=1)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # noqa: BLE001 (User predicate can raise anything)
       return ValidationResult(
         success=False, message=f"Rows({self.name}) raised exception: {e}"
       )
@@ -113,8 +114,6 @@ class Rows(BaseValidator[pd.DataFrame]):
 
 
 class Between[T: (pd.Series[float], pd.DataFrame)](NumericValidator[T]):
-  """Validates that values fall within [lower, upper]."""
-
   __slots__ = ("inclusive", "lower", "upper")
 
   def __init__(self, lower: float, upper: float, /, inclusive: str = "both") -> None:
@@ -129,6 +128,7 @@ class Between[T: (pd.Series[float], pd.DataFrame)](NumericValidator[T]):
       return True
     last = start + (length - 1) * step
 
+    # Check both ends of the range
     if self.inclusive == "both":
       return (start >= self.lower and start <= self.upper) and (
         last >= self.lower and last <= self.upper
@@ -187,8 +187,6 @@ class Between[T: (pd.Series[float], pd.DataFrame)](NumericValidator[T]):
 
 
 class Outside[T: (pd.Series[float], pd.DataFrame)](NumericValidator[T]):
-  """Validates that values fall outside the range [lower, upper]."""
-
   __slots__ = ("inclusive", "lower", "upper")
 
   def __init__(self, lower: float, upper: float, /, inclusive: str = "neither") -> None:
@@ -203,6 +201,8 @@ class Outside[T: (pd.Series[float], pd.DataFrame)](NumericValidator[T]):
       return True
     last = start + (length - 1) * step
 
+    # Outside means EVERY value must be outside.
+    # For a monotonic range, this means the WHOLE range must be either < lower or > upper.
     if self.inclusive == "neither":
       return (start <= self.lower and last <= self.lower) or (
         start >= self.upper and last >= self.upper

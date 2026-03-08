@@ -63,16 +63,6 @@ def ensure_instance[T: PandasLike](
 
 
 class BaseValidator[T: PandasLike](ABC):
-  """Abstract base class for all validators in Datawarden.
-
-  Defines the core interface for validation, logical composition, and
-  Numba-accelerated execution.
-
-  Attributes:
-    priority: Integer determining the relative execution order (low is first).
-    complexity: Integer estimate of the computational cost of the validator.
-  """
-
   __slots__ = ("_numba_key", "complexity", "name")
   priority: int = Priority.DEFAULT
 
@@ -141,17 +131,7 @@ class BaseValidator[T: PandasLike](ABC):
     return "".join(parts)
 
   @abstractmethod
-  def validate(self, data: T, context: ValidationContext) -> ValidationResult:
-    """Validate the provided data.
-
-    Args:
-      data: The Pandas Series, DataFrame, or Index to validate.
-      context: Carries state across validation calls (e.g., for sequence checks).
-
-    Returns:
-      A ValidationResult indicating success or failure.
-    """
-    ...
+  def validate(self, data: T, context: ValidationContext) -> ValidationResult: ...
 
   def _get_mask_numpy(self, data: npt.NDArray[np.floating]) -> npt.NDArray[np.bool_]:
     # Fallback: call validate and extract mask? No, too slow.
@@ -159,15 +139,12 @@ class BaseValidator[T: PandasLike](ABC):
     raise NotImplementedError
 
   def decompose(self) -> list[BaseValidator[T]]:
-    """Decompose complex validators into atomic components for optimization."""
     return [self]
 
   def negate(self) -> BaseValidator[T]:
-    """Return a logical negation of this validator."""
     return Not(self)
 
   def transform(self) -> list[BaseValidator[T]]:
-    """Apply logical transformations (e.g., De Morgan's) for optimization."""
     return [self]
 
   def clone(self) -> Self:
@@ -293,15 +270,6 @@ class BaseValidator[T: PandasLike](ABC):
 
 
 class And[T: PandasLike](BaseValidator[T]):
-  """Logical AND combinator for validators.
-
-  Executes validators in sequence, failing at the first False result.
-  Can be fused into a single Numba kernel for extreme performance.
-
-  Example:
-    >>> validator = Gt(0) & Finite()
-  """
-
   __slots__ = ("validators",)
 
   def __init__(self, *validators: BaseValidator[T] | type[BaseValidator[T]]) -> None:
@@ -438,15 +406,6 @@ class And[T: PandasLike](BaseValidator[T]):
 
 
 class Or[T: PandasLike](BaseValidator[T]):
-  """Logical OR combinator for validators.
-
-  Validates that at least one of the child validators passes.
-  Supports JIT compilation and short-circuiting.
-
-  Example:
-    >>> validator = Gt(100) | IsNaN()
-  """
-
   __slots__ = ("validators",)
 
   def __init__(self, *validators: BaseValidator[T] | type[BaseValidator[T]]) -> None:
@@ -572,12 +531,6 @@ class Or[T: PandasLike](BaseValidator[T]):
 
 
 class Not[T: PandasLike](BaseValidator[T]):
-  """Logical NOT (negation) of a validator.
-
-  Example:
-    >>> validator = ~Gt(0)  # Same as Le(0)
-  """
-
   __slots__ = ("validator",)
 
   def __init__(self, validator: BaseValidator[T] | type[BaseValidator[T]], /) -> None:
@@ -650,8 +603,6 @@ class Not[T: PandasLike](BaseValidator[T]):
 
 
 class Pass[T: PandasLike](BaseValidator[T]):
-  """Validator that always passes."""
-
   __slots__ = ()
 
   @override
@@ -661,8 +612,6 @@ class Pass[T: PandasLike](BaseValidator[T]):
 
 
 class Fail[T: PandasLike](BaseValidator[T]):
-  """Validator that always fails."""
-
   __slots__ = ()
 
   @override

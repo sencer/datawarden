@@ -52,7 +52,7 @@ if TYPE_CHECKING:
 
   import numpy as np
 
-# Validated is a direct alias to Annotated to allow both types (Finite) and values (Ge(0)).
+# Validated is a direct alias to Annotated to allow both types (Finite) and values (Ge(0))
 Validated = Annotated
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -162,15 +162,6 @@ def _get_base_validators(base_type: object) -> list[BaseValidator[PandasLike]]:
 
 
 class ValidationPlan:
-  """Execution plan for validating function arguments.
-
-  The Plan analyzes the function signature once at wrap-time and 'compiles'
-  optimized validators for each argument. It supports:
-  - Positional and keyword argument mapping.
-  - Efficient default value validation.
-  - Lazy JIT optimization (re-optimizing if Numba settings change).
-  """
-
   __slots__ = (
     "arg_indices",
     "arg_names",
@@ -233,7 +224,6 @@ class ValidationPlan:
           self.arg_plans[name] = OptimizedPlan(all_validators, allow_none=allow_none)
 
   def validate_args(self, *args: object, **kwargs: object) -> None:
-    """Validate arguments against the prepared plan."""
     cfg = get_config()
     if cfg.enforce_cow:
       with pd.option_context("mode.copy_on_write", True):
@@ -284,8 +274,6 @@ class ValidationPlan:
 
 
 class GlobalScopeWrap(BaseValidator[pd.DataFrame]):
-  """Internal wrapper to apply a validator to all columns of a DataFrame."""
-
   __slots__ = ("exclude_columns", "validator")
 
   def __init__(
@@ -333,12 +321,6 @@ class GlobalScopeWrap(BaseValidator[pd.DataFrame]):
 
 
 class NumbaFusedValidator(BaseValidator["pd.Series[float] | pd.DataFrame"]):
-  """Validator that fuses multiple Numba-capable validators into a single kernel.
-
-  This is automatically created by the ValidationPlan when multiple numeric
-  validators are used on the same argument.
-  """
-
   __slots__ = ("fallback", "validators")
 
   def __init__(self, validators: list[BaseValidator[PandasLike]]) -> None:
@@ -556,12 +538,6 @@ def _optimize[T: PandasLike](
 
 
 class OptimizedPlan[T: PandasLike]:
-  """Optimized validation strategy for a single argument.
-
-  Handles logical fusion, parallel execution, and chunked validation for
-  large datasets.
-  """
-
   __slots__ = ("allow_none", "heavy_validator_count", "validators")
 
   def __init__(
@@ -577,7 +553,6 @@ class OptimizedPlan[T: PandasLike]:
     )
 
   def execute_fast(self, data: object) -> str | None:
-    """Execute validation using the most efficient path available."""
     if data is None and self.allow_none:
       return None
 
@@ -721,22 +696,6 @@ class OptimizedPlan[T: PandasLike]:
 
 
 def validate[**P, R](func: Callable[P, R]) -> Callable[P, R]:
-  """Decorator to enforce data validation at runtime using type hints.
-
-  Analyzes `Validated[Type, Rules]` annotations to build a high-performance
-  execution plan. Supports Numba acceleration, logic fusion, and
-  multi-threaded validation.
-
-  Example:
-    >>> @validate
-    ... def process_data(df: Validated[pd.DataFrame, Gt(0), Finite]):
-    ...     return df.mean()
-
-  Performance:
-    - Minimized decorator latency (~12ns when skipping).
-    - Automatic logic fusion (compiles multiple checks into one pass).
-    - Zero-copy validation via memory views where possible.
-  """
   cfg = get_config()
   if cfg.skip_validation:
     return func
