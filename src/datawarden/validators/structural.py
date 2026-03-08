@@ -229,10 +229,10 @@ class Index(BaseValidator["pd.Series[float] | pd.DataFrame"]):
   ) -> None:
     super().__init__()
     # Clone validators to ensure state isolation (Prototype Pattern)
-    cloned: list[BaseValidator[pd.Index[float]]] = [
+    cloned: list[BaseValidator[pd.Index[Any]]] = [
       ensure_instance(v).clone() for v in validators
     ]
-    self.validator: BaseValidator[pd.Index[float]] = (
+    self.validator: BaseValidator[pd.Index[Any]] = (
       And(*cloned) if len(cloned) > 1 else cloned[0]
     )
     self.complexity = self.validator.complexity
@@ -311,16 +311,15 @@ class Column(BaseValidator["pd.Series[float] | pd.DataFrame"]):
   def __init__(
     self,
     column: str,
-    *validators: BaseValidator[pd.Series[Any]]
-    | type[BaseValidator[pd.Series[Any]]],
+    *validators: BaseValidator[pd.Series[Any]] | type[BaseValidator[pd.Series[Any]]],
   ) -> None:
     super().__init__(column)
     self.column = column
-    cloned: list[BaseValidator[pd.Series[float]]] = [
+    cloned: list[BaseValidator[pd.Series[Any]]] = [
       ensure_instance(v).clone() for v in validators
     ]
     if not cloned:
-      self.validator: BaseValidator[pd.Series[float]] = Pass()
+      self.validator: BaseValidator[pd.Series[Any]] = Pass()
     elif len(cloned) == 1:
       self.validator = cloned[0]
     else:

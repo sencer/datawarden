@@ -45,6 +45,8 @@ from .validators import (
   ValidationResult,
 )
 
+__version__ = "0.1.2"
+
 __all__ = [
   "And",
   "BaseValidator",
@@ -90,6 +92,7 @@ __all__ = [
   "Unique",
   "Validated",
   "ValidationResult",
+  "__version__",
   "get_config",
   "validate",
 ]

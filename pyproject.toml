@@ -1,6 +1,6 @@
 [project]
 name = "datawarden"
-version = "0.1.1"
+version = "0.1.2"
 description = "Declarative data validation library for Pandas"
 authors = [{ name = "Sencer S.", email = "nospam@gmail.com" }]
 license = { text = "MIT" }
