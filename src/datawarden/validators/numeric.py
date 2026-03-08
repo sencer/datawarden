@@ -77,44 +77,40 @@ class NumericValidator[T: (pd.Series[float], pd.DataFrame, pd.Index)](BaseValida
 
     return None
 
-  @override
-  def validate(self, data: T, context: ValidationContext) -> ValidationResult:  # noqa: PLR0911
-    del context  # Unused
-    # Fast path for RangeIndex - O(1) bounds check
-    if isinstance(data, pd.RangeIndex):
-      try:
-        if self._validate_range(data.start, data.stop, data.step, len(data)):
-          return SUCCESS
-        return ValidationResult(success=False, message=str(self))
-      except NotImplementedError:
-        pass
+  def _validate_range_index(self, data: pd.RangeIndex) -> ValidationResult | None:
+    try:
+      if self._validate_range(data.start, data.stop, data.step, len(data)):
+        return SUCCESS
+      return ValidationResult(success=False, message=str(self))
+    except NotImplementedError:
+      return None
 
-    # Optimization: Use Numba if possible
-    if self.numba_supported and get_config().use_numba:
-      try:
-        # Single-target numeric validation via Numba
-        # This expects a Series or a 1-column DataFrame/Index
-        if isinstance(data, pd.DataFrame):
-          if len(data.columns) > 1:
-            # Fallback to numpy/pandas for multi-column data if no targets specified
-            raise ValueError("Direct DataFrame validation requires explicit targets")
-          col_map = {data.columns[0]: 0}
-        else:
-          col_map = None
+  def _validate_numba(self, data: T) -> ValidationResult | None:
+    if not (self.numba_supported and get_config().use_numba):
+      return None
 
-        success, mask = run_numba_validation_column_mode(
-          data, [self], col_map, len(data), cache_obj=self
+    try:
+      if isinstance(data, pd.DataFrame):
+        if len(data.columns) > 1:
+          raise ValueError("Direct DataFrame validation requires explicit targets")
+        col_map = {data.columns[0]: 0}
+      else:
+        col_map = None
+
+      success, mask = run_numba_validation_column_mode(
+        data, [self], col_map, len(data), cache_obj=self
+      )
+      if success:
+        return SUCCESS
+      if mask is not None:
+        return ValidationResult(
+          success=False, message=str(self), mask=self._build_error_mask(data, mask)
         )
-        if success:
-          return SUCCESS
-        if mask is not None:
-          return ValidationResult(
-            success=False, message=str(self), mask=self._build_error_mask(data, mask)
-          )
-      except (RuntimeError, ValueError, TypeError, ImportError, AttributeError):
-        pass
+    except (RuntimeError, ValueError, TypeError, ImportError, AttributeError):
+      pass
+    return None
 
-    # Standard path: NumPy vectorization
+  def _validate_standard(self, data: T) -> ValidationResult:
     try:
       vals = data.values
       if hasattr(vals, "to_numpy"):
@@ -129,6 +125,20 @@ class NumericValidator[T: (pd.Series[float], pd.DataFrame, pd.Index)](BaseValida
       )
     except (AttributeError, NotImplementedError, TypeError, ValueError):
       return ValidationResult(success=False, message="Validation logic not implemented")
+
+  @override
+  def validate(self, data: T, context: ValidationContext) -> ValidationResult:
+    del context
+    if isinstance(data, pd.RangeIndex):
+      res = self._validate_range_index(data)
+      if res is not None:
+        return res
+
+    res = self._validate_numba(data)
+    if res is not None:
+      return res
+
+    return self._validate_standard(data)
 
 
 class ComparisonValidator[T: (pd.Series[float], pd.DataFrame, pd.Index)](

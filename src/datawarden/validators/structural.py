@@ -49,6 +49,7 @@ class IsInstance[T](BaseValidator[PandasLike]):
       name = str(self.type_)
     return f"IsInstance({name})"
 
+
 class Columns(And[pd.DataFrame]):
   __slots__ = ()
 
@@ -299,7 +300,8 @@ class Column(BaseValidator["pd.Series[float] | pd.DataFrame"]):
   def __init__(
     self,
     column: str,
-    *validators: BaseValidator[pd.Series[float]] | type[BaseValidator[pd.Series[float]]],
+    *validators: BaseValidator[pd.Series[float]]
+    | type[BaseValidator[pd.Series[float]]],
   ) -> None:
     super().__init__(column)
     self.column = column
