@@ -100,12 +100,23 @@ class Dtype(BaseValidator[DtypeSupported]):
   ) -> ValidationResult:
     del context  # Unused
     if isinstance(data, (pd.Series, pd.Index)):
-      if data.dtype == self.dtype:
+      if pd.api.types.is_dtype_equal(data.dtype, self.dtype):
+        return SUCCESS
+      # Special case for Datetime (allow US/MS/NS)
+      if isinstance(self, Datetime) and np.issubdtype(data.dtype, np.datetime64):
         return SUCCESS
       return ValidationResult(
         success=False, message=f"Expected dtype {self.dtype}, got {data.dtype}"
       )
-    failed_cols = [col for col in data.columns if data[col].dtype != self.dtype]
+    failed_cols = []
+    for col in data.columns:
+      dtype = data[col].dtype
+      if pd.api.types.is_dtype_equal(dtype, self.dtype):
+        continue
+      if isinstance(self, Datetime) and np.issubdtype(dtype, np.datetime64):
+        continue
+      failed_cols.append(col)
+
     if failed_cols:
       return ValidationResult(
         success=False,

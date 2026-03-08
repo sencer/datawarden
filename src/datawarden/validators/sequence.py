@@ -163,12 +163,16 @@ class NoTimeGaps(BaseValidator["pd.Series[float] | pd.Index[float]"]):
   def validate(
     self, data: pd.Series[float] | pd.Index[float], context: ValidationContext
   ) -> ValidationResult:
-    vals = data.values
-
-    if not np.issubdtype(vals.dtype, np.datetime64):
+    if not np.issubdtype(data.dtype, np.datetime64):
       return ValidationResult(
         success=False, message="NoTimeGaps requires datetime64 data"
       )
+
+    # Normalize to ns for consistent int64 viewing
+    if data.dtype == "datetime64[ns]":
+      vals = data.values
+    else:
+      vals = data.values.astype("datetime64[ns]")
 
     if len(vals) == 0:
       return SUCCESS
@@ -243,10 +247,14 @@ class MaxGap(BaseValidator["pd.Series[float] | pd.Index[float]"]):
   def validate(
     self, data: pd.Series[float] | pd.Index[float], context: ValidationContext
   ) -> ValidationResult:
-    vals = data.values
-
-    if not np.issubdtype(vals.dtype, np.datetime64):
+    if not np.issubdtype(data.dtype, np.datetime64):
       return ValidationResult(success=False, message="MaxGap requires datetime64 data")
+
+    # Normalize to ns for consistent int64 viewing
+    if data.dtype == "datetime64[ns]":
+      vals = data.values
+    else:
+      vals = data.values.astype("datetime64[ns]")
 
     if len(vals) == 0:
       return SUCCESS
