@@ -63,7 +63,7 @@ class Columns(And[pd.DataFrame]):
     super().__init__(*cols)
 
 
-type DtypeSupported = pd.Series[float] | pd.DataFrame | pd.Index[float]
+type DtypeSupported = pd.Series[Any] | pd.DataFrame | pd.Index[Any]
 
 
 class Dtype(BaseValidator[DtypeSupported]):
@@ -225,7 +225,7 @@ class Index(BaseValidator["pd.Series[float] | pd.DataFrame"]):
 
   def __init__(
     self,
-    *validators: BaseValidator[pd.Index[float]] | type[BaseValidator[pd.Index[float]]],
+    *validators: BaseValidator[Any] | type[BaseValidator[Any]],
   ) -> None:
     super().__init__()
     # Clone validators to ensure state isolation (Prototype Pattern)
@@ -311,8 +311,8 @@ class Column(BaseValidator["pd.Series[float] | pd.DataFrame"]):
   def __init__(
     self,
     column: str,
-    *validators: BaseValidator[pd.Series[float]]
-    | type[BaseValidator[pd.Series[float]]],
+    *validators: BaseValidator[pd.Series[Any]]
+    | type[BaseValidator[pd.Series[Any]]],
   ) -> None:
     super().__init__(column)
     self.column = column
