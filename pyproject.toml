@@ -20,7 +20,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/datawarden"]
-[dependency-groups]
+[project.optional-dependencies]
 dev = [
     "basedpyright>=1.36.2",
     "hypothesis>=6.148.11",
