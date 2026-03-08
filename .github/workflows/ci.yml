@@ -45,7 +45,7 @@ jobs:
     - name: Performance Regression Check
       run: |
         source .venv/bin/activate
-        python benchmarks/benchmark.py --ci
+        python benchmarks/ci_regression.py
 
   scan:
     name: Vulnerability Scan
