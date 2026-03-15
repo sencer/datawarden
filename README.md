@@ -3,7 +3,7 @@
 ![CI](https://github.com/sencer/datawarden/actions/workflows/ci.yml/badge.svg)
 ![codecov](https://codecov.io/gh/sencer/datawarden/branch/master/graph/badge.svg)
 
-**High-performance, JIT-accelerated data validation for Pandas and NumPy.**
+**High-performance, JIT-accelerated data validation for Pandas.**
 
 `datawarden` is a high-performance validation library that provides a clean, type-safe way to express data validation constraints directly in function signatures. It utilizes Python type hints to declare validation rules, which are then compiled into optimized machine code using **Numba JIT** for near-zero runtime overhead.
 
@@ -42,12 +42,12 @@ from datawarden import validate, Validated, Gt, Finite, NotEmpty
 
 @validate
 def calculate_returns(
-    prices: Validated[pd.Series, NotEmpty, Finite],
-    threshold: Validated[float, Gt(0)] = 0.01
+    prices: Validated[pd.Series, NotEmpty, Finite, Gt(0)],
+    threshold: float = 0.01
 ) -> pd.Series:
     """
-    prices is validated to be NotEmpty and have only Finite values (no NaN/Inf).
-    threshold is validated to be > 0.
+    prices is validated to be NotEmpty, have only Finite values, and all values > 0.
+    threshold is a regular float.
     """
     return prices.pct_change()
 
@@ -57,7 +57,8 @@ returns = calculate_returns(prices)
 
 # Invalid data raises ValidationError with a detailed report
 bad_prices = pd.Series([100.0, np.nan, 102.0])
-# Raises: ValidationError: Data contains non-finite values (NaN/Inf)
+# Raises: ValidationError: Argument 'prices' failed validation:
+#  - Finite (1/3 rows failed)
 calculate_returns(bad_prices)
 ```
 
@@ -91,11 +92,11 @@ def check_bounds(df: Validated[pd.DataFrame, Ge('max', 'min', 'base')]):
 Maintain validation state across data chunks – essential for streaming pipelines.
 
 ```python
-from datawarden import MonoUp, NoTimeGaps
+from datawarden import MonoUp, NoTimeGaps, Index
 
-# Ensure timestamps are strictly increasing and have no gaps across all chunks
+# Ensure timestamps are increasing and have no gaps across all chunks
 @validate
-def ingest_stream(chunk: Validated[pd.DataFrame, Index(MonoUp(strict=True) & NoTimeGaps("1min"))]):
+def ingest_stream(chunk: Validated[pd.DataFrame, Index(MonoUp(), NoTimeGaps("1min"))]):
     ...
 ```
 
@@ -141,16 +142,16 @@ with Overrides(skip_validation=True):
 | `warn_only` | `False` | Log a warning instead of raising `ValidationError`. |
 | `chunk_size_rows` | `None` | Automatically split large data into chunks for memory efficiency. |
 | `use_numba` | `True` | Enable/Disable JIT compilation via Numba. |
-| `parallel_threshold` | `100,000` | Minimum row count to trigger parallel multi-argument validation. |
+| `parallel_threshold_rows` | `100,000` | Minimum row count to trigger parallel multi-argument validation. |
 
 ---
 
 ## 📖 Available Validators
 
 ### Structural
-*   **`Index(validator)`**: Apply any validator to the data index.
-*   **`Columns(validator)`**: Validate column names/presence.
-*   **`Column(name, validator)`**: Apply validator to a specific column.
+*   **`Index(*validators)`**: Apply validators to the data index.
+*   **`Columns(names, *validators)`**: Apply validators to a set of columns.
+*   **`Column(name, *validators)`**: Apply validators to a specific column.
 *   **`Shape(rows, cols)`**: Validate container dimensions.
 *   **`NotEmpty` / `Empty`**: Check for content existence.
 
@@ -161,9 +162,10 @@ with Overrides(skip_validation=True):
 *   **`Positive` / `Negative`** / **`NonNegative`** / **`NonPositive`**: Sign checks.
 
 ### Sequence & Stateful
-*   **`MonoUp` / `MonoDown`**: Monotonicity (strict or non-strict).
+*   **`MonoUp` / `MonoDown`**: Monotonicity checks across chunks.
 *   **`NoTimeGaps(freq)`**: Continuous time series check.
-*   **`MaxGap(limit)`**: Maximum interval size check.
+*   **`MaxGap(duration)`**: Maximum interval size check.
+*   **`Unique`**: Ensure all values are unique.
 
 ### Value & Custom
 *   **`Between(low, high)`** / **`Outside(low, high)`**: Range checks.
