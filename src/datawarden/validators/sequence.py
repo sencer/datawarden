@@ -335,8 +335,12 @@ class Unique[T: (pd.Series[float], pd.Index[float])](BaseValidator[T]):
 
 
 class MonoUp(BaseValidator["pd.Series[float] | pd.Index[float]"]):
-  __slots__ = ()
+  __slots__ = ("strict",)
   priority = Priority.COMPLEX
+
+  def __init__(self, strict: bool = False) -> None:
+    super().__init__()
+    self.strict = strict
 
   @property
   @override
@@ -359,10 +363,12 @@ class MonoUp(BaseValidator["pd.Series[float] | pd.Index[float]"]):
   ) -> None:
     # Per-element monotonicity check: first element passes, rest check arr[i-1] <= arr[i]
     # Using 'arr' and 'i' which are the loop variables in the generated kernel
+    op = "<" if self.strict else "<="
     if is_range_index and arr_name == "index_arr":
-      parts.append("((i == 0) or (r_step >= 0))")
+      r_op = ">" if self.strict else ">="
+      parts.append(f"((i == 0) or (r_step {r_op} 0))")
     else:
-      parts.append(f"((i == 0) or ({arr_name}[i-1] <= {target}))")
+      parts.append(f"((i == 0) or ({arr_name}[i-1] {op} {target}))")
 
   @property
   @override
@@ -379,14 +385,15 @@ class MonoUp(BaseValidator["pd.Series[float] | pd.Index[float]"]):
     vals = cast("npt.NDArray[np.floating[Any]]", data.values)
     last_val = context.extra.get(self._state_key)
     if last_val is not None:
-      res = bool(vals[0] >= last_val)
-      # If result is False or NA, it's a failure (strict)
+      res = bool(vals[0] > last_val if self.strict else vals[0] >= last_val)
+      # If result is False or NA, it's a failure
       if not res:
         return ValidationResult(
           success=False, message="Monotonicity broken between chunks"
         )
 
-    if pd.Series(vals).is_monotonic_increasing:
+    # Use pandas helper if not chunking and no custom logic needed
+    if not self.strict and pd.Series(vals).is_monotonic_increasing:
       context.extra[self._state_key] = vals[-1]
       return SUCCESS
 
@@ -396,7 +403,12 @@ class MonoUp(BaseValidator["pd.Series[float] | pd.Index[float]"]):
     filled = pd.Series(vals, copy=False).ffill().values if has_nans else vals
     mask = np.empty(len(vals), dtype=np.bool_)
     mask[0] = True
-    mask[1:] = (pd.Series(filled[1:]) >= pd.Series(filled[:-1])).values
+    
+    s_vals = pd.Series(filled)
+    if self.strict:
+      mask[1:] = (s_vals.iloc[1:].values > s_vals.iloc[:-1].values)
+    else:
+      mask[1:] = (s_vals.iloc[1:].values >= s_vals.iloc[:-1].values)
 
     # Reject NaNs by default (allowed if wrapped in Or(..., IsNaN))
     if has_nans:
@@ -404,18 +416,28 @@ class MonoUp(BaseValidator["pd.Series[float] | pd.Index[float]"]):
 
     context.extra[self._state_key] = vals[-1]
     pd_mask = pd.Series(mask, index=data if isinstance(data, pd.Index) else data.index)
+    
+    if mask.all():
+        return SUCCESS
+        
     return ValidationResult(
-      success=False, message="Not monotonically increasing", mask=pd_mask
+      success=False, 
+      message=f"Not monotonically increasing{' (strict)' if self.strict else ''}", 
+      mask=pd_mask
     )
 
   @override
   def __str__(self) -> str:
-    return "MonoUp"
+    return f"MonoUp(strict={self.strict})"
 
 
 class MonoDown(BaseValidator["pd.Series[float] | pd.Index[float]"]):
-  __slots__ = ()
+  __slots__ = ("strict",)
   priority = Priority.COMPLEX
+
+  def __init__(self, strict: bool = False) -> None:
+    super().__init__()
+    self.strict = strict
 
   @property
   @override
@@ -437,10 +459,12 @@ class MonoDown(BaseValidator["pd.Series[float] | pd.Index[float]"]):
     is_range_index: bool = False,
   ) -> None:
     # Per-element monotonicity check: first element passes, rest check arr[i-1] >= arr[i]
+    op = ">" if self.strict else ">="
     if is_range_index and arr_name == "index_arr":
-      parts.append("((i == 0) or (r_step <= 0))")
+      r_op = "<" if self.strict else "<="
+      parts.append(f"((i == 0) or (r_step {r_op} 0))")
     else:
-      parts.append(f"((i == 0) or ({arr_name}[i-1] >= {target}))")
+      parts.append(f"((i == 0) or ({arr_name}[i-1] {op} {target}))")
 
   @property
   @override
@@ -457,14 +481,15 @@ class MonoDown(BaseValidator["pd.Series[float] | pd.Index[float]"]):
     vals = cast("npt.NDArray[np.floating[Any]]", data.values)
     last_val = context.extra.get(self._state_key)
     if last_val is not None:
-      res = bool(vals[0] <= last_val)
-      # If result is False or NA, it's a failure (strict)
-      if res is False or (res is not True and pd.isna(res)):
+      res = bool(vals[0] < last_val if self.strict else vals[0] <= last_val)
+      # If result is False or NA, it's a failure
+      if not res:
         return ValidationResult(
           success=False, message="Monotonicity broken between chunks"
         )
 
-    if pd.Series(vals).is_monotonic_decreasing:
+    # Use pandas helper if not chunking and no custom logic needed
+    if not self.strict and pd.Series(vals).is_monotonic_decreasing:
       context.extra[self._state_key] = vals[-1]
       return SUCCESS
 
@@ -474,7 +499,12 @@ class MonoDown(BaseValidator["pd.Series[float] | pd.Index[float]"]):
     filled = pd.Series(vals, copy=False).ffill().values if has_nans else vals
     mask = np.empty(len(vals), dtype=np.bool_)
     mask[0] = True
-    mask[1:] = (pd.Series(filled[1:]) <= pd.Series(filled[:-1])).values
+    
+    s_vals = pd.Series(filled)
+    if self.strict:
+      mask[1:] = (s_vals.iloc[1:].values < s_vals.iloc[:-1].values)
+    else:
+      mask[1:] = (s_vals.iloc[1:].values <= s_vals.iloc[:-1].values)
 
     # Reject NaNs
     if has_nans:
@@ -482,10 +512,16 @@ class MonoDown(BaseValidator["pd.Series[float] | pd.Index[float]"]):
 
     context.extra[self._state_key] = vals[-1]
     pd_mask = pd.Series(mask, index=data if isinstance(data, pd.Index) else data.index)
+
+    if mask.all():
+        return SUCCESS
+
     return ValidationResult(
-      success=False, message="Not monotonically decreasing", mask=pd_mask
+      success=False, 
+      message=f"Not monotonically decreasing{' (strict)' if self.strict else ''}", 
+      mask=pd_mask
     )
 
   @override
   def __str__(self) -> str:
-    return "MonoDown"
+    return f"MonoDown(strict={self.strict})"

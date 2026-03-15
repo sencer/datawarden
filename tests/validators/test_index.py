@@ -135,6 +135,39 @@ class TestMonoUp:
     with pytest.raises(ValidationError):
       process(data)
 
+  def test_monoup_strict_fails_on_equal_values(self):
+    """Test MonoUp(strict=True) rejects equal consecutive values."""
+
+    @validate
+    def process(data: Validated[pd.Series, MonoUp(strict=True)]) -> pd.Series:
+      return data
+
+    data = pd.Series([1, 2, 2, 3])
+    with pytest.raises(ValidationError, match=r"Not monotonically increasing \(strict\)"):
+      process(data)
+
+  def test_monoup_strict_passes_on_strictly_increasing_values(self):
+    """Test MonoUp(strict=True) passes on strictly increasing values."""
+
+    @validate
+    def process(data: Validated[pd.Series, MonoUp(strict=True)]) -> pd.Series:
+      return data
+
+    data = pd.Series([1, 2, 3, 4])
+    result = process(data)
+    assert result.equals(data)
+
+  def test_monoup_explicit_non_strict_passes_on_equal_values(self):
+    """Test MonoUp(strict=False) explicitly allows equal consecutive values."""
+
+    @validate
+    def process(data: Validated[pd.Series, MonoUp(strict=False)]) -> pd.Series:
+      return data
+
+    data = pd.Series([1, 2, 2, 3])
+    result = process(data)
+    assert result.equals(data)
+
   def test_index_monoup(self):
     """Test Index[MonoUp] validator with monotonic index."""
 
@@ -188,6 +221,28 @@ class TestMonoUp:
 
 class TestMonoDown:
   """Tests for MonoDown (monotonically decreasing) validator."""
+
+  def test_monodown_strict_fails_on_equal_values(self):
+    """Test MonoDown(strict=True) rejects equal consecutive values."""
+
+    @validate
+    def process(data: Validated[pd.Series, MonoDown(strict=True)]) -> pd.Series:
+      return data
+
+    data = pd.Series([3, 2, 2, 1])
+    with pytest.raises(ValidationError, match=r"Not monotonically decreasing \(strict\)"):
+      process(data)
+
+  def test_monodown_strict_passes_on_strictly_decreasing_values(self):
+    """Test MonoDown(strict=True) passes on strictly decreasing values."""
+
+    @validate
+    def process(data: Validated[pd.Series, MonoDown(strict=True)]) -> pd.Series:
+      return data
+
+    data = pd.Series([4, 3, 2, 1])
+    result = process(data)
+    assert result.equals(data)
 
   def test_valid_series_decreasing(self):
     """Test MonoDown validator with valid decreasing Series."""

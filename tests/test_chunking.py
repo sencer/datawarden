@@ -46,6 +46,35 @@ def test_stateful_monoup_chunking() -> None:
     process(df)
 
 
+def test_monoup_strict_chunked_fails_on_equal_boundary() -> None:
+  """Test MonoUp(strict=True) fails when values are equal across chunk boundary."""
+  # Chunk 1: [1.0, 2.0], Chunk 2: [2.0, 3.0]
+  s = pd.Series([1.0, 2.0, 2.0, 3.0])
+
+  @validate
+  def process_strict(s: Validated[pd.Series, MonoUp(strict=True)]) -> bool:
+    del s
+    return True
+
+  with Overrides(chunk_size_rows=2), pytest.raises(ValidationError) as exc:
+    process_strict(s)
+  assert "Monotonicity broken between chunks" in str(exc.value)
+
+
+def test_monoup_strict_chunked_passes_on_increasing_boundary() -> None:
+  """Test MonoUp(strict=True) passes when values strictly increase across chunk boundary."""
+  # Chunk 1: [1.0, 2.0], Chunk 2: [2.1, 3.0]
+  s = pd.Series([1.0, 2.0, 2.1, 3.0])
+
+  @validate
+  def process_strict(s: Validated[pd.Series, MonoUp(strict=True)]) -> bool:
+    del s
+    return True
+
+  with Overrides(chunk_size_rows=2):
+    assert process_strict(s)
+
+
 def test_chunking_notimegaps() -> None:
   # Create valid hourly data
   dates = pd.date_range(start="2023-01-01", periods=100, freq="h")
