@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from datawarden import Validated, validate
+from datawarden import Overrides, Validated, validate
 from datawarden.context import ValidationContext
 from datawarden.exceptions import ValidationError
 from datawarden.validators import And, MonoDown, MonoUp, Positive
@@ -60,7 +60,6 @@ class TestNumbaMonoUpStrict:
     """Test MonoUp(strict=True) rejects equal values in JIT path."""
     s = pd.Series([1.0, 2.0, 2.0, 3.0])
     # Force Numba for small data
-    from datawarden import Overrides
     with Overrides(numba_threshold=1):
       ctx = ValidationContext(root_data=s)
       result = MonoUp(strict=True).validate(s, ctx)
@@ -70,7 +69,6 @@ class TestNumbaMonoUpStrict:
   def test_mono_up_strict_passes_on_increasing_values(self) -> None:
     """Test MonoUp(strict=True) passes on strictly increasing values in JIT path."""
     s = pd.Series([1.0, 2.0, 3.0, 4.0])
-    from datawarden import Overrides
     with Overrides(numba_threshold=1):
       ctx = ValidationContext(root_data=s)
       result = MonoUp(strict=True).validate(s, ctx)
@@ -108,7 +106,6 @@ class TestNumbaMonoDownStrict:
   def test_mono_down_strict_fails_on_equal_values(self) -> None:
     """Test MonoDown(strict=True) rejects equal values in JIT path."""
     s = pd.Series([3.0, 2.0, 2.0, 1.0])
-    from datawarden import Overrides
     with Overrides(numba_threshold=1):
       ctx = ValidationContext(root_data=s)
       result = MonoDown(strict=True).validate(s, ctx)
@@ -118,7 +115,6 @@ class TestNumbaMonoDownStrict:
   def test_mono_down_strict_passes_on_decreasing_values(self) -> None:
     """Test MonoDown(strict=True) passes on strictly decreasing values in JIT path."""
     s = pd.Series([4.0, 3.0, 2.0, 1.0])
-    from datawarden import Overrides
     with Overrides(numba_threshold=1):
       ctx = ValidationContext(root_data=s)
       result = MonoDown(strict=True).validate(s, ctx)
